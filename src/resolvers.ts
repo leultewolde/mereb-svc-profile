@@ -1,9 +1,9 @@
-import type { IResolvers } from '@graphql-tools/utils';
-import { GraphQLScalarType, Kind, type ValueNode } from 'graphql';
-import { randomUUID } from 'node:crypto';
-import { signMediaUrl } from '@mereb/shared-packages';
-import { prisma } from './prisma.js';
-import type { GraphQLContext } from './context.js';
+import type {IResolvers} from '@graphql-tools/utils';
+import {GraphQLScalarType, Kind, type ValueNode} from 'graphql';
+import {randomUUID} from 'node:crypto';
+import {signMediaUrl} from '@mereb/shared-packages';
+import {prisma} from './prisma.js';
+import type {GraphQLContext} from './context.js';
 
 type User = {
   id: string;
@@ -19,7 +19,7 @@ type UserReference = { id: string };
 function deriveHandle(source: string) {
   const normalised = source
     .toLowerCase()
-    .replace(/[^a-z0-9_]/g, '')
+    .replaceAll(/[^a-z0-9_]/g, '')
     .slice(0, 32);
   if (normalised.length > 2) {
     return normalised;
@@ -61,7 +61,7 @@ const AnyScalar = new GraphQLScalarType({
   parseLiteral: (ast) => parseAnyLiteral(ast)
 });
 
-export function createResolvers(): IResolvers<any, GraphQLContext> {
+export function createResolvers(): IResolvers<unknown, GraphQLContext> {
   const resolveUserReference = async (ref: UserReference) => {
     const { id } = ref;
     const existing = await prisma.user.findUnique({ where: { id } });
@@ -153,9 +153,7 @@ export function createResolvers(): IResolvers<any, GraphQLContext> {
       },
       createdAt: (user: unknown) => {
         const { createdAt } = user as User;
-        return createdAt instanceof Date
-          ? createdAt.toISOString()
-          : new Date(createdAt).toISOString();
+        return createdAt.toISOString();
       }
     },
     Query: {
@@ -203,17 +201,14 @@ export function createResolvers(): IResolvers<any, GraphQLContext> {
         _source: unknown,
         args: { representations: Array<{ __typename?: string }> }
       ) => {
-        const results = await Promise.all(
-          args.representations.map(async (representation) => {
-            switch (representation.__typename) {
-              case 'User':
-                return resolveUserReference(representation as UserReference);
-              default:
+          return await Promise.all(
+            args.representations.map(async (representation) => {
+                if (representation.__typename === 'User') {
+                    return resolveUserReference(representation as UserReference);
+                }
                 return null;
-            }
-          })
+            })
         );
-        return results;
       }
     },
     Mutation: {
@@ -230,10 +225,10 @@ export function createResolvers(): IResolvers<any, GraphQLContext> {
           where: { id: ctx.userId },
           update: {
             ...(args.displayName ? { displayName: args.displayName } : {}),
-            ...(args.bio !== undefined ? { bio: args.bio } : {}),
-            ...(args.avatarKey !== undefined
-              ? { avatarKey: args.avatarKey }
-              : {})
+            ...(args.bio === undefined ? {} : {bio: args.bio}),
+            ...(args.avatarKey === undefined
+                ? {}
+                : {avatarKey: args.avatarKey})
           },
           create: {
             id: ctx.userId,
@@ -312,5 +307,5 @@ export function createResolvers(): IResolvers<any, GraphQLContext> {
         return resolveUserReference({ id: targetId });
       }
     }
-  } as IResolvers<any, GraphQLContext>;
+  } as IResolvers<unknown, GraphQLContext>;
 }

@@ -51,7 +51,7 @@ export async function buildServer(): Promise<FastifyInstance> {
 
     try {
       const payload = await verifyJwt(token, { issuer, audience });
-      request.userId = payload.sub as string | undefined;
+      request.userId = payload.sub;
     } catch (error) {
       request.log.warn({ err: error }, 'JWT verification failed');
       request.userId = undefined;
