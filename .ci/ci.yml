@@ -39,7 +39,7 @@ deploy:
     when: branch=main & !pr
     autoPromote: true
     smoke:
-      url: https://profile.dev.mereb.social/healthz
+      url: https://api-dev.mereb.app/profile/healthz
 
   stg:
     release: svc-profile-stg
@@ -56,7 +56,7 @@ deploy:
       message: "Promote svc-profile deployment to staging?"
       submitter: release-managers
     smoke:
-      url: https://profile.stg.mereb.social/healthz
+      url: https://api-stg.mereb.app/profile/healthz
 
   prd:
     release: svc-profile
@@ -72,7 +72,7 @@ deploy:
       message: "Deploy svc-profile to production?"
       submitter: release-managers
     smoke:
-      url: https://profile.mereb.social/healthz
+      url: https://api.mereb.app/profile/healthz
 
 signing:
   enabled: false
