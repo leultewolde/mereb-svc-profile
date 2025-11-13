@@ -1,0 +1,61 @@
+nameOverride: svc-profile
+
+replicaCount: 2
+
+imagePullSecrets:
+  - regcred
+
+image:
+  repository: registry.leultewolde.com/mereb/svc-profile
+  env:
+    - name: NODE_ENV
+      value: production
+    - name: SERVICE_NAME
+      value: svc-profile
+  envFrom:
+    - configMapRef:
+        name: svc-profile-stg-config
+    - secretRef:
+        name: svc-profile-stg-secrets
+        optional: true
+
+service:
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      containerPort: 4001
+
+ingress:
+  enabled: true
+  className: kong
+  annotations:
+    kubernetes.io/ingress.class: kong
+    cert-manager.io/cluster-issuer: letsencrypt-http
+    konghq.com/strip-path: "true"
+  hosts:
+    - host: api-stg.mereb.app
+      paths:
+        - path: /profile
+          pathType: Prefix
+          servicePort: http
+  tls:
+    - secretName: profile-stg-tls
+      hosts:
+        - api-stg.mereb.app
+
+configMap:
+  enabled: true
+  nameOverride: svc-profile-stg-config
+  data:
+    PORT: "4001"
+    OIDC_ISSUER: https://idp.stg.mereb.social/realms/mereb
+    OIDC_AUDIENCE: mereb-stg
+
+resources:
+  requests:
+    cpu: 125m
+    memory: 192Mi
+  limits:
+    cpu: 350m
+    memory: 512Mi

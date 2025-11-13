@@ -1,0 +1,35 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/client"
+  binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x", "linux-arm64-openssl-3.0.x"]
+}
+
+model User {
+  id          String   @id @default(cuid())
+  handle      String   @unique @db.VarChar(32)
+  displayName String   @db.VarChar(80)
+  bio         String?  @db.VarChar(280)
+  avatarKey   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  followers   Follow[] @relation("Followers")
+  following   Follow[] @relation("Following")
+}
+
+model Follow {
+  followerId String
+  followingId String
+  createdAt   DateTime @default(now())
+
+  follower User @relation("Following", fields: [followerId], references: [id], onDelete: Cascade)
+  following User @relation("Followers", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@id([followerId, followingId])
+  @@index([followingId])
+  @@index([followerId])
+}

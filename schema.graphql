@@ -1,0 +1,45 @@
+scalar FieldSet
+
+directive @external on FIELD_DEFINITION
+directive @provides(fields: FieldSet) on FIELD_DEFINITION
+directive @key(fields: FieldSet) repeatable on OBJECT | INTERFACE
+directive @extends on OBJECT | INTERFACE
+
+scalar _Any
+
+type User @key(fields: "id") {
+  id: ID!
+  handle: String!
+  displayName: String!
+  bio: String
+  avatarUrl: String
+  followersCount: Int!
+  followingCount: Int!
+  followedByMe: Boolean!
+  createdAt: String!
+}
+
+type AdminUserMetrics {
+  totalUsers: Int!
+  newUsersToday: Int!
+  newUsersThisWeek: Int!
+}
+
+union _Entity = User
+
+type Query {
+  me: User
+  userByHandle(handle: String!): User
+  adminUserMetrics: AdminUserMetrics!
+  adminRecentUsers(limit: Int = 10): [User!]!
+}
+
+type Mutation {
+  updateProfile(displayName: String, bio: String, avatarKey: String): User!
+  followUser(userId: ID!): User!
+  unfollowUser(userId: ID!): User!
+}
+
+extend type Query {
+  _entities(representations: [_Any!]!): [_Entity]!
+}
