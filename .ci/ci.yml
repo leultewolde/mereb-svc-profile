@@ -40,6 +40,9 @@ deploy:
     autoPromote: true
     smoke:
       url: https://api-dev.mereb.app/profile/healthz
+      retries: 3
+      delay: 10
+      timeout: 60s
 
   stg:
     release: svc-profile-stg
@@ -57,6 +60,9 @@ deploy:
       submitter: release-managers
     smoke:
       url: https://api-stg.mereb.app/profile/healthz
+      retries: 3
+      delay: 10
+      timeout: 60s
 
   prd:
     release: svc-profile
@@ -73,6 +79,9 @@ deploy:
       submitter: release-managers
     smoke:
       url: https://api.mereb.app/profile/healthz
+      retries: 3
+      delay: 10
+      timeout: 60s
 
 signing:
   enabled: false
