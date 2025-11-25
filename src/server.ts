@@ -82,6 +82,11 @@ export async function buildServer(): Promise<FastifyInstance> {
       preferred_username?: string;
       email?: string;
       name?: string;
+      details?: {
+        username?: string;
+        identity_provider_identity?: string;
+        email?: string;
+      };
     };
   }>('/internal/users/bootstrap', async (request, reply) => {
     if (!webhookSecret && !(webhookBasicUser && webhookBasicPass)) {
@@ -121,19 +126,25 @@ export async function buildServer(): Promise<FastifyInstance> {
 
     console.log('Creating user with data:', request.body);
 
-    const { sub: subFromBody, userId, preferred_username, email, name } = request.body ?? {};
+    const { sub: subFromBody, userId, preferred_username, email, name, details } = request.body ?? {};
     const sub = subFromBody ?? userId;
     if (!sub) {
       return reply.status(400).send({ error: 'Missing sub' });
     }
 
+    const inferredEmail = email ?? details?.email ?? details?.identity_provider_identity ?? null;
+    const inferredPreferred =
+      preferred_username ?? details?.identity_provider_identity ?? details?.username ?? null;
+    const inferredName = name ?? inferredPreferred ?? inferredEmail ?? null;
+      console.log('Inferred user data:', {inferredName, inferredEmail, inferredPreferred})
     const existing = await prisma.user.findUnique({ where: { id: sub } });
+      console.log('Existing user check:', existing);
     if (existing) {
       return { created: false, userId: existing.id };
     }
 
-    const preferredHandle = preferred_username ?? email ?? null;
-    const displayName = name ?? preferred_username ?? email ?? null;
+    const preferredHandle = inferredPreferred ?? inferredEmail;
+    const displayName = inferredName;
     const created = await createUserWithFallback({
       id: sub,
       preferredHandle,
@@ -141,6 +152,7 @@ export async function buildServer(): Promise<FastifyInstance> {
       bio: null,
       avatarKey: null
     });
+      console.log('Created user:', created);
 
     return { created: true, userId: created.id, handle: created.handle };
   });
