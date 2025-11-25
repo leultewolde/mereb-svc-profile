@@ -3,3 +3,4 @@ secret:
   nameOverride: {{SECRET_NAME}}
   stringData:
     DATABASE_URL: {{DATABASE_URL}}
+    KEYCLOAK_WEBHOOK_SECRET: {{KEYCLOAK_WEBHOOK_SECRET}}

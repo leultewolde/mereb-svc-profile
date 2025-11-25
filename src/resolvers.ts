@@ -1,9 +1,9 @@
 import type {IResolvers} from '@graphql-tools/utils';
 import {GraphQLScalarType, Kind, type ValueNode} from 'graphql';
-import {randomUUID} from 'node:crypto';
 import {signMediaUrl} from '@mereb/shared-packages';
 import {prisma} from './prisma.js';
 import type {GraphQLContext} from './context.js';
+import {createUserWithFallback, deriveHandle} from './user.js';
 
 type User = {
   id: string;
@@ -15,17 +15,6 @@ type User = {
 };
 
 type UserReference = { id: string };
-
-function deriveHandle(source: string) {
-  const normalised = source
-    .toLowerCase()
-    .replaceAll(/[^a-z0-9_]/g, '')
-    .slice(0, 32);
-  if (normalised.length > 2) {
-    return normalised;
-  }
-  return `user_${randomUUID().slice(0, 8)}`;
-}
 
 function parseAnyLiteral(ast: ValueNode): unknown {
   switch (ast.kind) {
@@ -69,39 +58,13 @@ export function createResolvers(): IResolvers<unknown, GraphQLContext> {
       return existing;
     }
 
-    const fallbackHandle = deriveHandle(id);
-
-    try {
-      return await prisma.user.create({
-        data: {
-          id,
-          handle: fallbackHandle,
-          displayName: fallbackHandle,
-          bio: null,
-          avatarKey: null
-        }
-      });
-    } catch (error) {
-      if (
-        error &&
-        typeof error === 'object' &&
-        'code' in error &&
-        (error as { code?: string }).code === 'P2002'
-      ) {
-        const uniqueHandle = `${fallbackHandle}_${randomUUID().slice(0, 6)}`;
-        return prisma.user.create({
-          data: {
-            id,
-            handle: uniqueHandle,
-            displayName: uniqueHandle,
-            bio: null,
-            avatarKey: null
-          }
-        });
-      }
-
-      throw error;
-    }
+    return createUserWithFallback({
+      id,
+      preferredHandle: id,
+      displayName: id,
+      bio: null,
+      avatarKey: null
+    });
   };
 
   return {

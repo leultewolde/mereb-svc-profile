@@ -18,6 +18,8 @@ import {
 } from '@mereb/shared-packages';
 import { createResolvers } from './resolvers.js';
 import type { GraphQLContext } from './context.js';
+import { createUserWithFallback } from './user.js';
+import { prisma } from './prisma.js';
 
 loadEnv();
 
@@ -41,6 +43,7 @@ export async function buildServer(): Promise<FastifyInstance> {
 
   const issuer = getEnv('OIDC_ISSUER');
   const audience = process.env.OIDC_AUDIENCE;
+  const webhookSecret = process.env.KEYCLOAK_WEBHOOK_SECRET;
 
   app.addHook('onRequest', async (request) => {
     const token = parseAuthHeader(request.headers);
@@ -68,6 +71,47 @@ export async function buildServer(): Promise<FastifyInstance> {
     graphiql: process.env.NODE_ENV !== 'production',
     federationMetadata: true,
     context: (request): GraphQLContext => ({ userId: request.userId })
+  });
+
+  app.post<{
+    Body: {
+      sub?: string;
+      preferred_username?: string;
+      email?: string;
+      name?: string;
+    };
+  }>('/internal/users/bootstrap', async (request, reply) => {
+    if (!webhookSecret) {
+      return reply.status(503).send({ error: 'Webhook not configured' });
+    }
+
+    const rawSecret = request.headers['x-keycloak-webhook-secret'] ?? request.headers['x-internal-token'];
+    const candidateSecret = Array.isArray(rawSecret) ? rawSecret[0] : rawSecret;
+    if (!candidateSecret || candidateSecret !== webhookSecret) {
+      return reply.status(401).send({ error: 'Unauthorized' });
+    }
+
+    const { sub, preferred_username, email, name } = request.body ?? {};
+    if (!sub) {
+      return reply.status(400).send({ error: 'Missing sub' });
+    }
+
+    const existing = await prisma.user.findUnique({ where: { id: sub } });
+    if (existing) {
+      return { created: false, userId: existing.id };
+    }
+
+    const preferredHandle = preferred_username ?? email ?? null;
+    const displayName = name ?? preferred_username ?? email ?? null;
+    const created = await createUserWithFallback({
+      id: sub,
+      preferredHandle,
+      displayName,
+      bio: null,
+      avatarKey: null
+    });
+
+    return { created: true, userId: created.id, handle: created.handle };
   });
 
   app.get('/healthz', async () => ({ status: 'ok' }));
