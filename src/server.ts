@@ -94,7 +94,7 @@ export async function buildServer(): Promise<FastifyInstance> {
 
     const hasSharedSecret = Boolean(webhookSecret && candidateSecret === webhookSecret);
     const hasBasicAuth = (() => {
-      if (!authHeader || !authHeader.startsWith('Basic ')) {
+      if (!authHeader?.startsWith('Basic ')) {
         return false;
       }
       const encoded = authHeader.slice('Basic '.length);
@@ -118,6 +118,8 @@ export async function buildServer(): Promise<FastifyInstance> {
     if (!hasSharedSecret && !hasBasicAuth) {
       return reply.status(401).send({ error: 'Unauthorized' });
     }
+
+    console.log('Creating user with data:', request.body);
 
     const { sub: subFromBody, userId, preferred_username, email, name } = request.body ?? {};
     const sub = subFromBody ?? userId;
