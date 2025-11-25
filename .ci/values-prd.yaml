@@ -50,7 +50,7 @@ configMap:
   data:
     PORT: "4001"
     OIDC_ISSUER: https://auth.mereb.app/realms/mereb
-    OIDC_AUDIENCE: mereb
+    OIDC_AUDIENCE: account
 
 resources:
   requests:
