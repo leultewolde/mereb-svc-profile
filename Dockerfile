@@ -10,10 +10,13 @@ COPY src src
 COPY tsconfig.base.json tsconfig.base.json
 COPY tsconfig.json tsconfig.json
 COPY tsconfig.eslint.json tsconfig.eslint.json
+COPY docker-entrypoint.sh docker-entrypoint.sh
 
 RUN corepack enable && \
     pnpm install --frozen-lockfile && \
     pnpm run prisma:generate && \
     pnpm run build
 
-CMD ["node", "dist/index.js"]
+RUN chmod +x docker-entrypoint.sh
+
+CMD ["./docker-entrypoint.sh"]
