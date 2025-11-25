@@ -16,7 +16,7 @@ image:
     - configMapRef:
         name: svc-profile-prd-config
     - secretRef:
-        name: svc-profile-prd-secrets
+        name: svc-profile-secrets
         optional: true
 
 service:
