@@ -78,6 +78,7 @@ export async function buildServer(): Promise<FastifyInstance> {
   app.post<{
     Body: {
       sub?: string;
+      userId?: string;
       preferred_username?: string;
       email?: string;
       name?: string;
@@ -118,7 +119,8 @@ export async function buildServer(): Promise<FastifyInstance> {
       return reply.status(401).send({ error: 'Unauthorized' });
     }
 
-    const { sub, preferred_username, email, name } = request.body ?? {};
+    const { sub: subFromBody, userId, preferred_username, email, name } = request.body ?? {};
+    const sub = subFromBody ?? userId;
     if (!sub) {
       return reply.status(400).send({ error: 'Missing sub' });
     }
