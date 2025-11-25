@@ -44,6 +44,8 @@ export async function buildServer(): Promise<FastifyInstance> {
   const issuer = getEnv('OIDC_ISSUER');
   const audience = process.env.OIDC_AUDIENCE;
   const webhookSecret = process.env.KEYCLOAK_WEBHOOK_SECRET;
+  const webhookBasicUser = process.env.KEYCLOAK_WEBHOOK_BASIC_USER;
+  const webhookBasicPass = process.env.KEYCLOAK_WEBHOOK_BASIC_PASS;
 
   app.addHook('onRequest', async (request) => {
     const token = parseAuthHeader(request.headers);
@@ -81,13 +83,38 @@ export async function buildServer(): Promise<FastifyInstance> {
       name?: string;
     };
   }>('/internal/users/bootstrap', async (request, reply) => {
-    if (!webhookSecret) {
+    if (!webhookSecret && !(webhookBasicUser && webhookBasicPass)) {
       return reply.status(503).send({ error: 'Webhook not configured' });
     }
 
     const rawSecret = request.headers['x-keycloak-webhook-secret'] ?? request.headers['x-internal-token'];
     const candidateSecret = Array.isArray(rawSecret) ? rawSecret[0] : rawSecret;
-    if (!candidateSecret || candidateSecret !== webhookSecret) {
+    const authHeader = request.headers.authorization;
+
+    const hasSharedSecret = Boolean(webhookSecret && candidateSecret === webhookSecret);
+    const hasBasicAuth = (() => {
+      if (!authHeader || !authHeader.startsWith('Basic ')) {
+        return false;
+      }
+      const encoded = authHeader.slice('Basic '.length);
+      let decoded: string;
+      try {
+        decoded = Buffer.from(encoded, 'base64').toString('utf8');
+      } catch {
+        return false;
+      }
+      const [user, pass] = decoded.split(':');
+      return Boolean(
+        user &&
+          pass &&
+          webhookBasicUser &&
+          webhookBasicPass &&
+          user === webhookBasicUser &&
+          pass === webhookBasicPass
+      );
+    })();
+
+    if (!hasSharedSecret && !hasBasicAuth) {
       return reply.status(401).send({ error: 'Unauthorized' });
     }
 

@@ -47,6 +47,12 @@ deploy:
           KEYCLOAK_WEBHOOK_SECRET:
             vaultPath: kv/data/apps/dev
             vaultField: KEYCLOAK_WEBHOOK_SECRET
+          KEYCLOAK_WEBHOOK_BASIC_USER:
+            vaultPath: kv/data/apps/dev
+            vaultField: KEYCLOAK_WEBHOOK_BASIC_USER
+          KEYCLOAK_WEBHOOK_BASIC_PASS:
+            vaultPath: kv/data/apps/dev
+            vaultField: KEYCLOAK_WEBHOOK_BASIC_PASS
     vault:
       url: https://vault.leultewolde.com
       tokenEnv: VAULT_TOKEN
@@ -82,6 +88,12 @@ deploy:
           KEYCLOAK_WEBHOOK_SECRET:
             vaultPath: kv/data/apps/stg
             vaultField: KEYCLOAK_WEBHOOK_SECRET
+          KEYCLOAK_WEBHOOK_BASIC_USER:
+            vaultPath: kv/data/apps/stg
+            vaultField: KEYCLOAK_WEBHOOK_BASIC_USER
+          KEYCLOAK_WEBHOOK_BASIC_PASS:
+            vaultPath: kv/data/apps/stg
+            vaultField: KEYCLOAK_WEBHOOK_BASIC_PASS
     vault:
       url: https://vault.leultewolde.com
       tokenEnv: VAULT_TOKEN
@@ -121,6 +133,12 @@ deploy:
           KEYCLOAK_WEBHOOK_SECRET:
             vaultPath: kv/data/apps/prd
             vaultField: KEYCLOAK_WEBHOOK_SECRET
+          KEYCLOAK_WEBHOOK_BASIC_USER:
+            vaultPath: kv/data/apps/prd
+            vaultField: KEYCLOAK_WEBHOOK_BASIC_USER
+          KEYCLOAK_WEBHOOK_BASIC_PASS:
+            vaultPath: kv/data/apps/prd
+            vaultField: KEYCLOAK_WEBHOOK_BASIC_PASS
     vault:
       url: https://vault.leultewolde.com
       tokenEnv: VAULT_TOKEN
