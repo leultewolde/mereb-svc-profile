@@ -131,8 +131,6 @@ export async function buildServer(): Promise<FastifyInstance> {
       return reply.status(401).send({ error: 'Unauthorized' });
     }
 
-    console.log('Creating user with data:', request.body);
-
     const { sub: subFromBody, userId, preferred_username, email, name, clientId, details } =
       request.body ?? {};
     const sub = subFromBody ?? userId;
@@ -148,9 +146,8 @@ export async function buildServer(): Promise<FastifyInstance> {
     const inferredPreferred =
       preferred_username ?? details?.identity_provider_identity ?? details?.username ?? null;
     const inferredName = name ?? inferredPreferred ?? inferredEmail ?? null;
-      console.log('Inferred user data:', {inferredName, inferredEmail, inferredPreferred})
+
     const existing = await prisma.user.findUnique({ where: { id: sub } });
-      console.log('Existing user check:', existing);
     if (existing) {
       return { created: false, userId: existing.id };
     }
@@ -164,7 +161,6 @@ export async function buildServer(): Promise<FastifyInstance> {
       bio: null,
       avatarKey: null
     });
-      console.log('Created user:', created);
 
     return { created: true, userId: created.id, handle: created.handle };
   });
