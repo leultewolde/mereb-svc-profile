@@ -46,6 +46,12 @@ export async function buildServer(): Promise<FastifyInstance> {
   const webhookSecret = process.env.KEYCLOAK_WEBHOOK_SECRET;
   const webhookBasicUser = process.env.KEYCLOAK_WEBHOOK_BASIC_USER;
   const webhookBasicPass = process.env.KEYCLOAK_WEBHOOK_BASIC_PASS;
+  const allowedWebhookClientIds =
+    process.env.KEYCLOAK_WEBHOOK_CLIENT_IDS
+      ?.split(',')
+      .map((value) => value.trim())
+      .filter(Boolean) ?? [];
+  const allowedWebhookClientIdSet = new Set(allowedWebhookClientIds);
 
   app.addHook('onRequest', async (request) => {
     const token = parseAuthHeader(request.headers);
@@ -82,6 +88,7 @@ export async function buildServer(): Promise<FastifyInstance> {
       preferred_username?: string;
       email?: string;
       name?: string;
+      clientId?: string;
       details?: {
         username?: string;
         identity_provider_identity?: string;
@@ -126,10 +133,15 @@ export async function buildServer(): Promise<FastifyInstance> {
 
     console.log('Creating user with data:', request.body);
 
-    const { sub: subFromBody, userId, preferred_username, email, name, details } = request.body ?? {};
+    const { sub: subFromBody, userId, preferred_username, email, name, clientId, details } =
+      request.body ?? {};
     const sub = subFromBody ?? userId;
     if (!sub) {
       return reply.status(400).send({ error: 'Missing sub' });
+    }
+
+    if (allowedWebhookClientIdSet.size > 0 && (!clientId || !allowedWebhookClientIdSet.has(clientId))) {
+      return reply.status(403).send({ error: 'Unauthorized client' });
     }
 
     const inferredEmail = email ?? details?.email ?? details?.identity_provider_identity ?? null;

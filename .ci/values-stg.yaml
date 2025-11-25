@@ -51,6 +51,7 @@ configMap:
     PORT: "4001"
     OIDC_ISSUER: https://auth.mereb.app/realms/mereb
     OIDC_AUDIENCE: account
+    KEYCLOAK_WEBHOOK_CLIENT_IDS: web-shell-stg
 
 resources:
   requests:
