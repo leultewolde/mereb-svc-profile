@@ -67,7 +67,7 @@ export async function buildServer(): Promise<FastifyInstance> {
     }
   });
 
-  const schema = makeExecutableSchema({
+  const schema = makeExecutableSchema<GraphQLContext>({
     typeDefs,
     resolvers: createResolvers()
   });
