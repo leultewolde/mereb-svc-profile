@@ -1,4 +1,4 @@
-import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance } from 'fastify';
 import helmet from '@fastify/helmet';
 import cors from '@fastify/cors';
 import sensible from '@fastify/sensible';
@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  createLogger,
+  createFastifyLoggerOptions,
   getEnv,
   loadEnv,
   parseAuthHeader,
@@ -23,8 +23,6 @@ import { prisma } from './prisma.js';
 
 loadEnv();
 
-const logger = createLogger('svc-profile');
-
 const typeDefsPath = join(
   dirname(fileURLToPath(import.meta.url)),
   '..',
@@ -33,7 +31,7 @@ const typeDefsPath = join(
 const typeDefs = readFileSync(typeDefsPath, 'utf8');
 
 export async function buildServer(): Promise<FastifyInstance> {
-  const app = Fastify({ logger: logger as FastifyBaseLogger });
+  const app = Fastify({logger: createFastifyLoggerOptions('svc-profile')});
 
   await app.register(helmet);
   await app.register(cors, { origin: true, credentials: true });
