@@ -39,6 +39,9 @@ enum OutboxStatus {
   PROCESSING
   PUBLISHED
   FAILED
+  DEAD_LETTER
+
+  @@map("ProfileOutboxStatus")
 }
 
 model OutboxEvent {
@@ -52,9 +55,12 @@ model OutboxEvent {
   nextAttemptAt DateTime  @default(now())
   lastError   String?
   publishedAt DateTime?
+  deadLetteredAt DateTime?
+  deadLetterTopic String? @db.VarChar(128)
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
 
-  @@index([status, nextAttemptAt, createdAt])
-  @@index([createdAt])
+  @@index([status, nextAttemptAt, createdAt], map: "ProfileOutboxEvent_status_nextAttemptAt_createdAt_idx")
+  @@index([createdAt], map: "ProfileOutboxEvent_createdAt_idx")
+  @@map("ProfileOutboxEvent")
 }

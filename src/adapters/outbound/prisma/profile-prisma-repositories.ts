@@ -222,6 +222,14 @@ export interface PendingProfileOutboxEvent {
   attempts: number;
 }
 
+export interface ProfileOutboxStatusCounts {
+  pending: number;
+  processing: number;
+  published: number;
+  failed: number;
+  deadLetter: number;
+}
+
 export class PrismaProfileOutboxRelayStore {
   constructor(private readonly db: ProfilePrismaDb = prisma) {}
 
@@ -279,9 +287,67 @@ export class PrismaProfileOutboxRelayStore {
         status: OutboxStatus.FAILED,
         lastError: error.slice(0, 4000),
         nextAttemptAt,
+        publishedAt: null,
+        deadLetteredAt: null,
+        deadLetterTopic: null
+      }
+    });
+  }
+
+  async markDeadLetter(
+    id: string,
+    error: string,
+    input?: { deadLetteredAt?: Date; deadLetterTopic?: string | null }
+  ): Promise<void> {
+    await this.db.outboxEvent.updateMany({
+      where: { id },
+      data: {
+        status: OutboxStatus.DEAD_LETTER,
+        lastError: error.slice(0, 4000),
+        deadLetteredAt: input?.deadLetteredAt ?? new Date(),
+        deadLetterTopic: input?.deadLetterTopic ?? null,
         publishedAt: null
       }
     });
+  }
+
+  async countByStatus(): Promise<ProfileOutboxStatusCounts> {
+    const rows = await this.db.outboxEvent.groupBy({
+      by: ['status'],
+      _count: { _all: true }
+    });
+
+    const counts: ProfileOutboxStatusCounts = {
+      pending: 0,
+      processing: 0,
+      published: 0,
+      failed: 0,
+      deadLetter: 0
+    };
+
+    for (const row of rows) {
+      switch (row.status) {
+        case OutboxStatus.PENDING:
+          counts.pending = row._count._all;
+          break;
+        case OutboxStatus.PROCESSING:
+          counts.processing = row._count._all;
+          break;
+        case OutboxStatus.PUBLISHED:
+          counts.published = row._count._all;
+          break;
+        case OutboxStatus.FAILED:
+          counts.failed = row._count._all;
+          break;
+        case OutboxStatus.DEAD_LETTER:
+          counts.deadLetter = row._count._all;
+          break;
+        default:
+          break;
+      }
+    }
+
+    return counts;
   }
 }
 
