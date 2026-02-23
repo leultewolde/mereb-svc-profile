@@ -43,3 +43,13 @@ export interface EventPublisherPort {
     envelope: IntegrationEventEnvelope<TData>
   ): Promise<void>;
 }
+
+export interface ProfileMutationPorts {
+  users: UserRepositoryPort;
+  follows: FollowRepositoryPort;
+  eventPublisher: EventPublisherPort;
+}
+
+export interface ProfileTransactionPort {
+  run<T>(callback: (ports: ProfileMutationPorts) => Promise<T>): Promise<T>;
+}

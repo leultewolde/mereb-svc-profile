@@ -21,7 +21,9 @@ import type {
   EventPublisherPort,
   FollowRepositoryPort,
   MediaUrlSignerPort,
+  ProfileMutationPorts,
   ProfileReadRepositoryPort,
+  ProfileTransactionPort,
   UserRepositoryPort
 } from './ports.js';
 import type {
@@ -37,6 +39,7 @@ interface ProfileUseCaseDeps {
   eventPublisher: EventPublisherPort;
   mediaUrlSigner: MediaUrlSignerPort;
   eventProducerName: string;
+  transactionRunner?: ProfileTransactionPort;
 }
 
 function buildEnvelope<TData>(
@@ -56,12 +59,32 @@ function buildEnvelope<TData>(
 }
 
 async function publishBestEffort<TData>(
-  deps: Pick<ProfileUseCaseDeps, 'eventPublisher' | 'eventProducerName'>,
+  deps: Pick<ProfileUseCaseDeps, 'eventProducerName'> & { eventPublisher: EventPublisherPort },
   request: ProfileIntegrationEventRequest<TData>,
   occurredAt?: Date
 ) {
   const envelope = buildEnvelope(deps.eventProducerName, request, occurredAt);
   await deps.eventPublisher.publish(request, envelope);
+}
+
+function getDefaultMutationPorts(
+  deps: ProfileUseCaseDeps
+): ProfileMutationPorts {
+  return {
+    users: deps.users,
+    follows: deps.follows,
+    eventPublisher: deps.eventPublisher
+  };
+}
+
+async function runInMutationTransaction<T>(
+  deps: ProfileUseCaseDeps,
+  callback: (ports: ProfileMutationPorts) => Promise<T>
+): Promise<T> {
+  if (!deps.transactionRunner) {
+    return callback(getDefaultMutationPorts(deps));
+  }
+  return deps.transactionRunner.run(callback);
 }
 
 function toContextUserId(ctx: ExecutionContext): string {
@@ -91,28 +114,30 @@ export class BootstrapUserUseCase {
   constructor(private readonly deps: ProfileUseCaseDeps) {}
 
   async execute(input: BootstrapUserDraft): Promise<{ created: boolean; userId: string; handle?: string }> {
-    const existing = await this.deps.users.findById(input.id);
-    if (existing) {
-      return { created: false, userId: existing.id };
-    }
+    return runInMutationTransaction(this.deps, async (ports) => {
+      const existing = await ports.users.findById(input.id);
+      if (existing) {
+        return { created: false, userId: existing.id };
+      }
 
-    const created = await this.deps.users.findOrCreateWithFallback(input);
-    const domainEvent = userBootstrappedEvent(created.id, created.handle);
-    await publishBestEffort(
-      this.deps,
-      {
-        topic: PROFILE_EVENT_TOPICS.userBootstrapped,
-        eventType: PROFILE_EVENT_TOPICS.userBootstrapped,
-        key: created.id,
-        data: {
-          user_id: created.id,
-          handle: created.handle
-        }
-      },
-      domainEvent.occurredAt
-    );
+      const created = await ports.users.findOrCreateWithFallback(input);
+      const domainEvent = userBootstrappedEvent(created.id, created.handle);
+      await publishBestEffort(
+        { eventPublisher: ports.eventPublisher, eventProducerName: this.deps.eventProducerName },
+        {
+          topic: PROFILE_EVENT_TOPICS.userBootstrapped,
+          eventType: PROFILE_EVENT_TOPICS.userBootstrapped,
+          key: created.id,
+          data: {
+            user_id: created.id,
+            handle: created.handle
+          }
+        },
+        domainEvent.occurredAt
+      );
 
-    return { created: true, userId: created.id, handle: created.handle };
+      return { created: true, userId: created.id, handle: created.handle };
+    });
   }
 }
 
@@ -124,27 +149,29 @@ export class UpdateProfileUseCase {
     ctx: ExecutionContext
   ): Promise<UserProfileRecord> {
     const userId = toContextUserId(ctx);
-    const updated = await this.deps.users.upsertProfile(userId, patch);
-    const domainEvent = profileUpdatedEvent(updated.id, updated.handle);
+    return runInMutationTransaction(this.deps, async (ports) => {
+      const updated = await ports.users.upsertProfile(userId, patch);
+      const domainEvent = profileUpdatedEvent(updated.id, updated.handle);
 
-    await publishBestEffort(
-      this.deps,
-      {
-        topic: PROFILE_EVENT_TOPICS.userUpdated,
-        eventType: PROFILE_EVENT_TOPICS.userUpdated,
-        key: updated.id,
-        data: {
-          user_id: updated.id,
-          handle: updated.handle
+      await publishBestEffort(
+        { eventPublisher: ports.eventPublisher, eventProducerName: this.deps.eventProducerName },
+        {
+          topic: PROFILE_EVENT_TOPICS.userUpdated,
+          eventType: PROFILE_EVENT_TOPICS.userUpdated,
+          key: updated.id,
+          data: {
+            user_id: updated.id,
+            handle: updated.handle
+          },
+          correlationId: ctx.correlationId,
+          causationId: ctx.causationId,
+          tenantId: ctx.tenantId
         },
-        correlationId: ctx.correlationId,
-        causationId: ctx.causationId,
-        tenantId: ctx.tenantId
-      },
-      domainEvent.occurredAt
-    );
+        domainEvent.occurredAt
+      );
 
-    return updated;
+      return updated;
+    });
   }
 }
 
@@ -167,35 +194,37 @@ export class FollowUserUseCase {
       throw error;
     }
 
-    const user = await this.deps.users.findOrCreateWithFallback({
-      id: followingId,
-      preferredHandle: followingId,
-      displayName: followingId,
-      bio: null,
-      avatarKey: null
-    });
+    return runInMutationTransaction(this.deps, async (ports) => {
+      const user = await ports.users.findOrCreateWithFallback({
+        id: followingId,
+        preferredHandle: followingId,
+        displayName: followingId,
+        bio: null,
+        avatarKey: null
+      });
 
-    await this.deps.follows.upsertFollow(followerId, followingId);
+      await ports.follows.upsertFollow(followerId, followingId);
 
-    const domainEvent = userFollowedEvent(followerId, followingId);
-    await publishBestEffort(
-      this.deps,
-      {
-        topic: PROFILE_EVENT_TOPICS.userFollowed,
-        eventType: PROFILE_EVENT_TOPICS.userFollowed,
-        key: followingId,
-        data: {
-          follower_id: followerId,
-          following_id: followingId
+      const domainEvent = userFollowedEvent(followerId, followingId);
+      await publishBestEffort(
+        { eventPublisher: ports.eventPublisher, eventProducerName: this.deps.eventProducerName },
+        {
+          topic: PROFILE_EVENT_TOPICS.userFollowed,
+          eventType: PROFILE_EVENT_TOPICS.userFollowed,
+          key: followingId,
+          data: {
+            follower_id: followerId,
+            following_id: followingId
+          },
+          correlationId: ctx.correlationId,
+          causationId: ctx.causationId,
+          tenantId: ctx.tenantId
         },
-        correlationId: ctx.correlationId,
-        causationId: ctx.causationId,
-        tenantId: ctx.tenantId
-      },
-      domainEvent.occurredAt
-    );
+        domainEvent.occurredAt
+      );
 
-    return user;
+      return user;
+    });
   }
 }
 
@@ -218,35 +247,37 @@ export class UnfollowUserUseCase {
       throw error;
     }
 
-    await this.deps.follows.deleteFollowIfExists(followerId, followingId);
+    return runInMutationTransaction(this.deps, async (ports) => {
+      await ports.follows.deleteFollowIfExists(followerId, followingId);
 
-    const user = await this.deps.users.findOrCreateWithFallback({
-      id: followingId,
-      preferredHandle: followingId,
-      displayName: followingId,
-      bio: null,
-      avatarKey: null
-    });
+      const user = await ports.users.findOrCreateWithFallback({
+        id: followingId,
+        preferredHandle: followingId,
+        displayName: followingId,
+        bio: null,
+        avatarKey: null
+      });
 
-    const domainEvent = userUnfollowedEvent(followerId, followingId);
-    await publishBestEffort(
-      this.deps,
-      {
-        topic: PROFILE_EVENT_TOPICS.userUnfollowed,
-        eventType: PROFILE_EVENT_TOPICS.userUnfollowed,
-        key: followingId,
-        data: {
-          follower_id: followerId,
-          following_id: followingId
+      const domainEvent = userUnfollowedEvent(followerId, followingId);
+      await publishBestEffort(
+        { eventPublisher: ports.eventPublisher, eventProducerName: this.deps.eventProducerName },
+        {
+          topic: PROFILE_EVENT_TOPICS.userUnfollowed,
+          eventType: PROFILE_EVENT_TOPICS.userUnfollowed,
+          key: followingId,
+          data: {
+            follower_id: followerId,
+            following_id: followingId
+          },
+          correlationId: ctx.correlationId,
+          causationId: ctx.causationId,
+          tenantId: ctx.tenantId
         },
-        correlationId: ctx.correlationId,
-        causationId: ctx.causationId,
-        tenantId: ctx.tenantId
-      },
-      domainEvent.occurredAt
-    );
+        domainEvent.occurredAt
+      );
 
-    return user;
+      return user;
+    });
   }
 }
 
