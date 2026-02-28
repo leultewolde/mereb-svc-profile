@@ -56,6 +56,9 @@ configMap:
   data:
     PORT: "4001"
     PROFILE_EVENTS_ENABLED: "true"
+    KAFKA_BROKERS: platform-stg-redpanda-0.platform-stg-redpanda.platform-stg.svc.cluster.local:9092
+    KAFKA_SSL: "true"
+    KAFKA_SSL_INSECURE: "true"
     OIDC_ISSUER: https://auth.mereb.app/realms/mereb
     OIDC_AUDIENCE: account
     KEYCLOAK_WEBHOOK_CLIENT_IDS: web-shell-stg
