@@ -40,6 +40,31 @@ type StartedContainer = Awaited<ReturnType<GenericContainer['start']>>;
 let postgresContainer: StartedContainer | null = null;
 let redpandaContainer: StartedContainer | null = null;
 
+async function waitForDatabaseReady(timeoutMs = 30_000): Promise<void> {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const prisma = new PrismaClient({
+      datasources: {
+        db: {
+          url: getAdminDatabaseUrl()
+        }
+      }
+    });
+
+    try {
+      await prisma.$queryRawUnsafe('SELECT 1');
+      await prisma.$disconnect();
+      return;
+    } catch {
+      await prisma.$disconnect().catch(() => undefined);
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+    }
+  }
+
+  throw new Error('Postgres test container did not become query-ready in time');
+}
+
 beforeAll(async () => {
   postgresContainer = await new GenericContainer('postgres:16')
     .withEnvironment({
@@ -50,6 +75,7 @@ beforeAll(async () => {
     .withExposedPorts(5432)
     .withWaitStrategy(Wait.forLogMessage('database system is ready to accept connections'))
     .start();
+  await waitForDatabaseReady();
 
   redpandaContainer = await new GenericContainer('redpandadata/redpanda:v24.1.11')
     .withCommand([
@@ -69,7 +95,7 @@ beforeAll(async () => {
     .withExposedPorts(9092)
     .withWaitStrategy(Wait.forListeningPorts())
     .start();
-}, 60_000);
+}, 180_000);
 
 afterAll(async () => {
   await disconnectProducer().catch(() => undefined);
@@ -79,7 +105,7 @@ afterAll(async () => {
   if (postgresContainer) {
     await postgresContainer.stop();
   }
-}, 60_000);
+}, 180_000);
 
 function getAdminDatabaseUrl(): string {
   if (!postgresContainer) {
@@ -131,7 +157,7 @@ async function ensureServiceRole(admin: PrismaClient): Promise<void> {
 
 test(
   'bootstrapUser writes a profile outbox event and publishes it to Kafka',
-  { timeout: 60_000 },
+  { timeout: 180_000 },
   async () => {
     const schema = createTemporarySchemaName('svc_profile_it');
     const databaseUrl = withSchema(getBaseServiceDatabaseUrl(), schema);
