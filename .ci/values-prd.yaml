@@ -2,6 +2,12 @@ nameOverride: svc-profile
 
 replicaCount: 2
 
+deploymentStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 0
+    maxUnavailable: 1
+
 imagePullSecrets:
   - regcred
 
@@ -67,7 +73,7 @@ configMap:
 
 resources:
   requests:
-    cpu: 150m
+    cpu: 75m
     memory: 224Mi
   limits:
     cpu: 400m
@@ -76,5 +82,5 @@ resources:
 autoscaling:
   enabled: true
   minReplicas: 2
-  maxReplicas: 4
+  maxReplicas: 2
   targetCPUUtilizationPercentage: 70

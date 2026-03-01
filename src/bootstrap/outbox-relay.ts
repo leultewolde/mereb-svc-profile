@@ -3,7 +3,8 @@ import {
   createIntegrationEventEnvelope,
   createKafkaIntegrationEventPublisher,
   createLogger,
-  type IntegrationEventEnvelope
+  type IntegrationEventEnvelope,
+  type IntegrationEventPublisher
 } from '@mereb/shared-packages';
 import { PrismaProfileOutboxRelayStore } from '../adapters/outbound/prisma/profile-prisma-repositories.js';
 import {
@@ -16,6 +17,12 @@ const logger = createLogger('svc-profile-outbox-relay');
 export interface ProfileOutboxRelayStartOptions {
   unrefTimer?: boolean;
   intervalMs?: number;
+}
+
+export interface ProfileOutboxFlushOptions {
+  limit?: number;
+  store?: PrismaProfileOutboxRelayStore;
+  publisher?: IntegrationEventPublisher;
 }
 
 function isRelayEnabled(): boolean {
@@ -101,15 +108,26 @@ async function publishToDlq(
   });
 }
 
-async function flushOnce(limit = 50): Promise<void> {
-  const config = buildKafkaConfigFromEnv({ clientId: 'svc-profile-outbox-relay' });
-  if (!config) {
-    logger.warn('Profile outbox relay enabled but Kafka config is missing; skipping flush');
+async function flushOnce(
+  limit = 50,
+  store = new PrismaProfileOutboxRelayStore(),
+  publisherOverride?: IntegrationEventPublisher
+): Promise<void> {
+  const publisher =
+    publisherOverride ??
+    (() => {
+      const config = buildKafkaConfigFromEnv({ clientId: 'svc-profile-outbox-relay' });
+      if (!config) {
+        logger.warn('Profile outbox relay enabled but Kafka config is missing; skipping flush');
+        return null;
+      }
+
+      return createKafkaIntegrationEventPublisher(config);
+    })();
+  if (!publisher) {
     return;
   }
 
-  const publisher = createKafkaIntegrationEventPublisher(config);
-  const store = new PrismaProfileOutboxRelayStore();
   const due = await store.listDue(limit);
   const maxAttempts = getMaxAttempts();
 
@@ -229,6 +247,12 @@ async function flushOnce(limit = 50): Promise<void> {
     },
     'Profile outbox relay flush completed'
   );
+}
+
+export async function flushProfileOutboxOnce(
+  input: ProfileOutboxFlushOptions = {}
+): Promise<void> {
+  await flushOnce(input.limit ?? 50, input.store, input.publisher);
 }
 
 export function startProfileOutboxRelay(options: ProfileOutboxRelayStartOptions = {}): () => void {

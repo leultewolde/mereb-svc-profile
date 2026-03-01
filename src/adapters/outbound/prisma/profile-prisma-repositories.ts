@@ -352,8 +352,10 @@ export class PrismaProfileOutboxRelayStore {
 }
 
 export class PrismaProfileTransactionRunner implements ProfileTransactionPort {
+  constructor(private readonly db: PrismaClient = prisma) {}
+
   async run<T>(callback: (ports: ProfileMutationPorts) => Promise<T>): Promise<T> {
-    return prisma.$transaction(async (tx) =>
+    return this.db.$transaction(async (tx) =>
       callback({
         users: new PrismaUserRepository(tx),
         follows: new PrismaFollowRepository(tx),
