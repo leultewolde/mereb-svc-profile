@@ -35,7 +35,7 @@ type Query {
 }
 
 type Mutation {
-  updateProfile(displayName: String, bio: String, avatarKey: String): User!
+  updateProfile(displayName: String, bio: String, avatarKey: String, avatarAssetId: ID): User!
   followUser(userId: ID!): User!
   unfollowUser(userId: ID!): User!
 }

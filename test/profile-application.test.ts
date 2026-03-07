@@ -6,6 +6,7 @@ import {
 import type {
   EventPublisherPort,
   FollowRepositoryPort,
+  MediaAssetResolverPort,
   MediaUrlSignerPort,
   ProfileReadRepositoryPort,
   ProfileTransactionPort,
@@ -14,7 +15,8 @@ import type {
 import {
   AuthenticationRequiredError,
   CannotFollowSelfError,
-  CannotUnfollowSelfError
+  CannotUnfollowSelfError,
+  InvalidMediaAssetError
 } from '../src/domain/profile/errors.js';
 import type { UserProfileRecord } from '../src/domain/profile/user-profile.js';
 
@@ -145,6 +147,35 @@ class FakeEvents implements EventPublisherPort {
 class FakeMedia implements MediaUrlSignerPort {
   signMediaUrl(key: string): string {
     return `https://cdn.test/${key}`;
+  }
+}
+
+class FakeMediaAssetResolver implements MediaAssetResolverPort {
+  private readonly assets = new Map<string, { ownerId: string; status: string; key: string }>();
+
+  seed(input: { assetId: string; ownerId: string; status: string; key: string }) {
+    this.assets.set(input.assetId, {
+      ownerId: input.ownerId,
+      status: input.status,
+      key: input.key
+    });
+  }
+
+  async resolveOwnedReadyAsset(input: {
+    assetId: string;
+    userId: string;
+  }): Promise<{ key: string }> {
+    const asset = this.assets.get(input.assetId);
+    if (!asset) {
+      throw new InvalidMediaAssetError('INVALID_MEDIA_ASSET_NOT_FOUND');
+    }
+    if (asset.ownerId !== input.userId) {
+      throw new InvalidMediaAssetError('INVALID_MEDIA_ASSET_OWNER');
+    }
+    if (asset.status !== 'ready') {
+      throw new InvalidMediaAssetError('INVALID_MEDIA_ASSET_NOT_READY');
+    }
+    return { key: asset.key };
   }
 }
 
@@ -367,5 +398,67 @@ test('profile application surfaces auth and self-follow domain errors', async ()
   await assert.rejects(
     () => module.commands.unfollowUser.execute({ userId: 'viewer' }, { principal: { userId: 'viewer' } }),
     (error) => error instanceof CannotUnfollowSelfError
+  );
+});
+
+test('updateProfile resolves avatarAssetId with precedence over avatarKey and supports removal', async () => {
+  const users = new FakeUsers();
+  users.seed(
+    makeUser({
+      id: 'viewer',
+      handle: 'viewer',
+      displayName: 'Viewer',
+      avatarKey: 'current.png'
+    })
+  );
+
+  const mediaAssetResolver = new FakeMediaAssetResolver();
+  mediaAssetResolver.seed({
+    assetId: 'asset-1',
+    ownerId: 'viewer',
+    status: 'ready',
+    key: 'assets/avatar-1.png'
+  });
+
+  const module = createProfileApplicationModule({
+    users,
+    follows: new FakeFollows(),
+    profileRead: users,
+    eventPublisher: new FakeEvents(),
+    mediaUrlSigner: new FakeMedia(),
+    mediaAssetResolver,
+    eventProducerName: 'svc-profile'
+  });
+
+  const updatedWithAsset = await module.commands.updateProfile.execute(
+    {
+      avatarKey: 'legacy.png',
+      avatarAssetId: 'asset-1'
+    },
+    { principal: { userId: 'viewer' } }
+  );
+  assert.equal(updatedWithAsset.avatarKey, 'assets/avatar-1.png');
+
+  const removedAvatar = await module.commands.updateProfile.execute(
+    {
+      avatarKey: 'should-not-win.png',
+      avatarAssetId: null
+    },
+    { principal: { userId: 'viewer' } }
+  );
+  assert.equal(removedAvatar.avatarKey, null);
+
+  await assert.rejects(
+    () =>
+      module.commands.updateProfile.execute(
+        {
+          avatarAssetId: 'missing-asset'
+        },
+        { principal: { userId: 'viewer' } }
+      ),
+    (error) =>
+      error instanceof InvalidMediaAssetError
+      && error.code === 'INVALID_MEDIA_ASSET'
+      && error.message === 'INVALID_MEDIA_ASSET_NOT_FOUND'
   );
 });

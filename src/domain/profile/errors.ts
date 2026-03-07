@@ -22,3 +22,9 @@ export class CannotUnfollowSelfError extends ProfileDomainError {
     super('CANNOT_UNFOLLOW_SELF', 'A user cannot unfollow themselves');
   }
 }
+
+export class InvalidMediaAssetError extends ProfileDomainError {
+  constructor(message = 'Invalid media asset') {
+    super('INVALID_MEDIA_ASSET', message);
+  }
+}

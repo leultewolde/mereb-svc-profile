@@ -67,6 +67,7 @@ configMap:
   data:
     PORT: "4001"
     PROFILE_EVENTS_ENABLED: "true"
+    MEDIA_SERVICE_URL: http://svc-media-dev.apps-dev.svc.cluster.local
     KAFKA_BROKERS: platform-dev-redpanda-0.platform-dev-redpanda.platform-dev.svc.cluster.local:9092
     KAFKA_SSL: "true"
     KAFKA_SSL_INSECURE: "true"

@@ -4,7 +4,8 @@ import type { GraphQLContext } from '../../../context.js';
 import {
   AuthenticationRequiredError,
   CannotFollowSelfError,
-  CannotUnfollowSelfError
+  CannotUnfollowSelfError,
+  InvalidMediaAssetError
 } from '../../../domain/profile/errors.js';
 import type { UserProfileRecord } from '../../../domain/profile/user-profile.js';
 import type { ProfileApplicationModule } from '../../../application/profile/use-cases.js';
@@ -59,6 +60,9 @@ function toGraphQLError(error: unknown): never {
   }
   if (error instanceof CannotUnfollowSelfError) {
     throw new Error('CANNOT_UNFOLLOW_SELF');
+  }
+  if (error instanceof InvalidMediaAssetError) {
+    throw new Error(error.code);
   }
 
   throw error;
@@ -127,7 +131,12 @@ export function createResolvers(
     Mutation: {
       updateProfile: async (
         _source: unknown,
-        args: Partial<{ displayName: string; bio: string; avatarKey: string }>,
+        args: Partial<{
+          displayName: string;
+          bio: string | null;
+          avatarKey: string | null;
+          avatarAssetId: string | null;
+        }>,
         ctx: GraphQLContext
       ) => {
         try {
@@ -139,7 +148,10 @@ export function createResolvers(
               ...(args.bio === undefined ? {} : { bio: args.bio }),
               ...(args.avatarKey === undefined
                 ? {}
-                : { avatarKey: args.avatarKey })
+                : { avatarKey: args.avatarKey }),
+              ...(args.avatarAssetId === undefined
+                ? {}
+                : { avatarAssetId: args.avatarAssetId })
             },
             toExecutionContext(ctx)
           );

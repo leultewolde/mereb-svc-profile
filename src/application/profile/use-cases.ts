@@ -13,13 +13,15 @@ import {
 import {
   AuthenticationRequiredError,
   CannotFollowSelfError,
-  CannotUnfollowSelfError
+  CannotUnfollowSelfError,
+  InvalidMediaAssetError
 } from '../../domain/profile/errors.js';
 import type { ExecutionContext } from './context.js';
 import type {
   AdminUserMetrics,
   EventPublisherPort,
   FollowRepositoryPort,
+  MediaAssetResolverPort,
   MediaUrlSignerPort,
   ProfileMutationPorts,
   ProfileReadRepositoryPort,
@@ -38,6 +40,7 @@ interface ProfileUseCaseDeps {
   profileRead: ProfileReadRepositoryPort;
   eventPublisher: EventPublisherPort;
   mediaUrlSigner: MediaUrlSignerPort;
+  mediaAssetResolver?: MediaAssetResolverPort;
   eventProducerName: string;
   transactionRunner?: ProfileTransactionPort;
 }
@@ -144,13 +147,49 @@ export class BootstrapUserUseCase {
 export class UpdateProfileUseCase {
   constructor(private readonly deps: ProfileUseCaseDeps) {}
 
+  private async resolveAvatarKey(
+    userId: string,
+    input: {
+      avatarKey?: string | null;
+      avatarAssetId?: string | null;
+    }
+  ): Promise<string | null | undefined> {
+    if (input.avatarAssetId === undefined) {
+      return input.avatarKey;
+    }
+
+    if (input.avatarAssetId === null) {
+      return null;
+    }
+
+    if (!this.deps.mediaAssetResolver) {
+      throw new InvalidMediaAssetError('Media resolver is not configured');
+    }
+    const resolved = await this.deps.mediaAssetResolver.resolveOwnedReadyAsset({
+      assetId: input.avatarAssetId,
+      userId
+    });
+    return resolved.key;
+  }
+
   async execute(
-    patch: UpdateProfilePatch,
+    patch: UpdateProfilePatch & { avatarAssetId?: string | null },
     ctx: ExecutionContext
   ): Promise<UserProfileRecord> {
     const userId = toContextUserId(ctx);
+    const resolvedAvatarKey = await this.resolveAvatarKey(userId, {
+      avatarKey: patch.avatarKey,
+      avatarAssetId: patch.avatarAssetId
+    });
+
+    const upsertPatch: UpdateProfilePatch = {
+      ...(patch.displayName === undefined ? {} : { displayName: patch.displayName }),
+      ...(patch.bio === undefined ? {} : { bio: patch.bio }),
+      ...(resolvedAvatarKey === undefined ? {} : { avatarKey: resolvedAvatarKey })
+    };
+
     return runInMutationTransaction(this.deps, async (ports) => {
-      const updated = await ports.users.upsertProfile(userId, patch);
+      const updated = await ports.users.upsertProfile(userId, upsertPatch);
       const domainEvent = profileUpdatedEvent(updated.id, updated.handle);
 
       await publishBestEffort(

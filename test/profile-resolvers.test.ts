@@ -5,7 +5,8 @@ import type { ProfileApplicationModule } from '../src/application/profile/use-ca
 import {
   AuthenticationRequiredError,
   CannotFollowSelfError,
-  CannotUnfollowSelfError
+  CannotUnfollowSelfError,
+  InvalidMediaAssetError
 } from '../src/domain/profile/errors.js';
 
 function createProfileStub(): ProfileApplicationModule {
@@ -108,6 +109,30 @@ test('followUser maps CannotFollowSelfError to CANNOT_FOLLOW_SELF', async () => 
   await assert.rejects(
     () => followUser({}, { userId: 'u1' }, { userId: 'u1' }),
     (error) => error instanceof Error && error.message === 'CANNOT_FOLLOW_SELF'
+  );
+});
+
+test('updateProfile maps InvalidMediaAssetError to INVALID_MEDIA_ASSET', async () => {
+  const profile = createProfileStub();
+  profile.commands.updateProfile = {
+    async execute() {
+      throw new InvalidMediaAssetError('INVALID_MEDIA_ASSET_NOT_OWNER');
+    }
+  } as ProfileApplicationModule['commands']['updateProfile'];
+
+  const resolvers = createResolvers(profile);
+  const updateProfile = (
+    resolvers.Mutation as Record<string, (...args: unknown[]) => Promise<unknown>>
+  ).updateProfile;
+
+  await assert.rejects(
+    () =>
+      updateProfile(
+        {},
+        { avatarAssetId: 'asset-1' },
+        { userId: 'viewer' }
+      ),
+    (error) => error instanceof Error && error.message === 'INVALID_MEDIA_ASSET'
   );
 });
 

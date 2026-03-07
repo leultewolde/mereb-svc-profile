@@ -37,6 +37,13 @@ export interface MediaUrlSignerPort {
   signMediaUrl(key: string): string;
 }
 
+export interface MediaAssetResolverPort {
+  resolveOwnedReadyAsset(input: {
+    assetId: string;
+    userId: string;
+  }): Promise<{ key: string }>;
+}
+
 export interface EventPublisherPort {
   publish<TData>(
     request: ProfileIntegrationEventRequest<TData>,
