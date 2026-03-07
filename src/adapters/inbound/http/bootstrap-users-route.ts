@@ -18,11 +18,19 @@ type BootstrapBody = {
   preferred_username?: string;
   email?: string;
   name?: string;
+  first_name?: string;
+  last_name?: string;
+  given_name?: string;
+  family_name?: string;
   clientId?: string;
   details?: {
     username?: string;
     identity_provider_identity?: string;
     email?: string;
+    first_name?: string;
+    last_name?: string;
+    given_name?: string;
+    family_name?: string;
   };
 };
 
@@ -91,6 +99,10 @@ export async function registerBootstrapUsersRoute(
         preferred_username,
         email,
         name,
+        first_name,
+        last_name,
+        given_name,
+        family_name,
         clientId,
         details
       } = request.body ?? {};
@@ -114,7 +126,21 @@ export async function registerBootstrapUsersRoute(
         details?.identity_provider_identity ??
         details?.username ??
         null;
-      const inferredName = name ?? inferredPreferred ?? inferredEmail ?? null;
+      const preferredGiven =
+        given_name ??
+        first_name ??
+        details?.given_name ??
+        details?.first_name ??
+        null;
+      const preferredFamily =
+        family_name ??
+        last_name ??
+        details?.family_name ??
+        details?.last_name ??
+        null;
+      const inferredNameFromParts =
+        [preferredGiven, preferredFamily].filter(Boolean).join(' ').trim() || null;
+      const inferredName = name ?? inferredNameFromParts ?? inferredPreferred ?? inferredEmail ?? null;
 
       return deps.bootstrapUser.execute({
         id: sub,

@@ -5,6 +5,8 @@ import type {
   ProfileMutationPorts,
   ProfileReadRepositoryPort,
   ProfileTransactionPort,
+  UserConnectionRecord,
+  UserFollowCursor,
   UserRepositoryPort
 } from '../../../application/profile/ports.js';
 import type { ProfileIntegrationEventRequest } from '../../../contracts/profile-events.js';
@@ -45,6 +47,21 @@ function toUserRecord(input: {
     bio: input.bio,
     avatarKey: input.avatarKey,
     createdAt: input.createdAt
+  };
+}
+
+function followCursorWhere(cursor: UserFollowCursor | undefined, idField: 'followerId' | 'followingId'): Prisma.FollowWhereInput | undefined {
+  if (!cursor) {
+    return undefined;
+  }
+  return {
+    OR: [
+      { createdAt: { lt: cursor.createdAt } },
+      {
+        createdAt: cursor.createdAt,
+        [idField]: { lt: cursor.userId }
+      }
+    ]
   };
 }
 
@@ -108,6 +125,22 @@ export class PrismaUserRepository implements UserRepositoryPort, ProfileReadRepo
 
   async countUsers(): Promise<number> {
     return this.db.user.count();
+  }
+
+  async listDiscoverableUsers(input: { viewerId: string; limit: number }): Promise<UserProfileRecord[]> {
+    const users = await this.db.user.findMany({
+      where: {
+        id: { not: input.viewerId },
+        followers: {
+          none: {
+            followerId: input.viewerId
+          }
+        }
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: input.limit
+    });
+    return users.map(toUserRecord);
   }
 
   async countUsersCreatedSince(since: Date): Promise<number> {
@@ -190,6 +223,42 @@ export class PrismaFollowRepository implements FollowRepositoryPort {
     });
 
     return Boolean(existing);
+  }
+
+  async listFollowers(input: { userId: string; cursor?: UserFollowCursor; take: number }): Promise<UserConnectionRecord[]> {
+    const rows = await this.db.follow.findMany({
+      where: {
+        followingId: input.userId,
+        ...followCursorWhere(input.cursor, 'followerId')
+      },
+      include: {
+        follower: true
+      },
+      orderBy: [{ createdAt: 'desc' }, { followerId: 'desc' }],
+      take: input.take
+    });
+    return rows.map((row) => ({
+      user: toUserRecord(row.follower),
+      followedAt: row.createdAt
+    }));
+  }
+
+  async listFollowing(input: { userId: string; cursor?: UserFollowCursor; take: number }): Promise<UserConnectionRecord[]> {
+    const rows = await this.db.follow.findMany({
+      where: {
+        followerId: input.userId,
+        ...followCursorWhere(input.cursor, 'followingId')
+      },
+      include: {
+        following: true
+      },
+      orderBy: [{ createdAt: 'desc' }, { followingId: 'desc' }],
+      take: input.take
+    });
+    return rows.map((row) => ({
+      user: toUserRecord(row.following),
+      followedAt: row.createdAt
+    }));
   }
 }
 

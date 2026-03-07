@@ -48,7 +48,50 @@ const AnyScalar = new GraphQLScalarType({
 });
 
 function toExecutionContext(ctx: GraphQLContext): ExecutionContext {
-  return ctx.userId ? { principal: { userId: ctx.userId } } : {};
+  return ctx.userId
+    ? {
+        principal: { userId: ctx.userId },
+        identity: ctx.identity
+      }
+    : {};
+}
+
+function collapseNameParts(parts: Array<string | undefined>): string | undefined {
+  const value = parts
+    .map((part) => part?.trim())
+    .filter((part): part is string => Boolean(part))
+    .join(' ')
+    .trim();
+  return value.length > 0 ? value : undefined;
+}
+
+function deriveDisplayName(ctx: GraphQLContext): string | undefined {
+  return (
+    ctx.identity?.name?.trim() ||
+    collapseNameParts([ctx.identity?.givenName, ctx.identity?.familyName]) ||
+    ctx.identity?.preferredUsername?.trim() ||
+    ctx.identity?.email?.trim()
+  );
+}
+
+function derivePreferredHandle(ctx: GraphQLContext): string | undefined {
+  return ctx.identity?.preferredUsername?.trim() || ctx.identity?.email?.trim();
+}
+
+async function ensureViewerBootstrapped(
+  profile: ProfileApplicationModule,
+  ctx: GraphQLContext
+): Promise<void> {
+  if (!ctx.userId) {
+    return;
+  }
+  await profile.commands.bootstrapUser.execute({
+    id: ctx.userId,
+    preferredHandle: derivePreferredHandle(ctx) ?? ctx.userId,
+    displayName: deriveDisplayName(ctx) ?? ctx.userId,
+    bio: null,
+    avatarKey: null
+  });
 }
 
 function toGraphQLError(error: unknown): never {
@@ -87,6 +130,18 @@ export function createResolvers(
     User: {
       __resolveReference: async (ref: unknown) =>
         resolveUserReference(ref as UserReference),
+      followers: (user: unknown, args: { after?: string; limit?: number }) =>
+        profile.queries.getFollowersConnection.execute({
+          userId: (user as UserProfileRecord).id,
+          after: args.after,
+          limit: args.limit
+        }),
+      following: (user: unknown, args: { after?: string; limit?: number }) =>
+        profile.queries.getFollowingConnection.execute({
+          userId: (user as UserProfileRecord).id,
+          after: args.after,
+          limit: args.limit
+        }),
       avatarUrl: (user: unknown) =>
         profile.services.avatarUrlResolver.resolve(
           (user as UserProfileRecord).avatarKey
@@ -108,10 +163,17 @@ export function createResolvers(
         (user as UserProfileRecord).createdAt.toISOString()
     },
     Query: {
-      me: (_source: unknown, _args: unknown, ctx: GraphQLContext) =>
-        profile.queries.getMe.execute(toExecutionContext(ctx)),
+      me: async (_source: unknown, _args: unknown, ctx: GraphQLContext) => {
+        await ensureViewerBootstrapped(profile, ctx);
+        return profile.queries.getMe.execute(toExecutionContext(ctx));
+      },
       userByHandle: (_source: unknown, args: { handle: string }) =>
         profile.queries.getUserByHandle.execute({ handle: args.handle }),
+      discoverUsers: (_source: unknown, args: { limit?: number }, ctx: GraphQLContext) =>
+        profile.queries.discoverUsers.execute({
+          viewerId: ctx.userId,
+          limit: args.limit
+        }),
       adminUserMetrics: () => profile.queries.getAdminUserMetrics.execute(),
       adminRecentUsers: (_source: unknown, args: { limit?: number }) =>
         profile.queries.getAdminRecentUsers.execute({ limit: args.limit }),

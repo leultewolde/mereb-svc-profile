@@ -41,6 +41,29 @@ function parseAllowedWebhookClientIds(): Set<string> {
   return new Set(clientIds);
 }
 
+type JwtIdentityPayload = {
+  sub?: string;
+  preferred_username?: string;
+  email?: string;
+  name?: string;
+  given_name?: string;
+  family_name?: string;
+};
+
+function extractIdentityHints(payload: JwtIdentityPayload) {
+  const hints = {
+    preferredUsername: payload.preferred_username,
+    email: payload.email,
+    name: payload.name,
+    givenName: payload.given_name,
+    familyName: payload.family_name
+  };
+  if (!Object.values(hints).some(Boolean)) {
+    return undefined;
+  }
+  return hints;
+}
+
 export async function buildServer(): Promise<FastifyInstance> {
   const app = Fastify({
     logger: createFastifyLoggerOptions('svc-profile')
@@ -61,15 +84,18 @@ export async function buildServer(): Promise<FastifyInstance> {
     const token = parseAuthHeader(request.headers);
     if (!token) {
       request.userId = undefined;
+      request.identityHints = undefined;
       return;
     }
 
     try {
-      const payload = await verifyJwt(token, { issuer, audience });
+      const payload = (await verifyJwt(token, { issuer, audience })) as JwtIdentityPayload;
       request.userId = payload.sub;
+      request.identityHints = extractIdentityHints(payload);
     } catch (error) {
       request.log.warn({ err: error }, 'JWT verification failed');
       request.userId = undefined;
+      request.identityHints = undefined;
     }
   });
 
@@ -82,7 +108,7 @@ export async function buildServer(): Promise<FastifyInstance> {
     schema,
     graphiql: process.env.NODE_ENV !== 'production',
     federationMetadata: true,
-    context: (request): GraphQLContext => ({ userId: request.userId })
+    context: (request): GraphQLContext => ({ userId: request.userId, identity: request.identityHints })
   });
 
   await registerBootstrapUsersRoute(

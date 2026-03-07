@@ -13,10 +13,27 @@ type User @key(fields: "id") {
   displayName: String!
   bio: String
   avatarUrl: String
+  followers(after: String, limit: Int = 20): UserConnection!
+  following(after: String, limit: Int = 20): UserConnection!
   followersCount: Int!
   followingCount: Int!
   followedByMe: Boolean!
   createdAt: String!
+}
+
+type UserEdge {
+  node: User!
+  cursor: String!
+}
+
+type UserPageInfo {
+  endCursor: String
+  hasNextPage: Boolean!
+}
+
+type UserConnection {
+  edges: [UserEdge!]!
+  pageInfo: UserPageInfo!
 }
 
 type AdminUserMetrics {
@@ -30,6 +47,7 @@ union _Entity = User
 type Query {
   me: User
   userByHandle(handle: String!): User
+  discoverUsers(limit: Int = 8): [User!]!
   adminUserMetrics: AdminUserMetrics!
   adminRecentUsers(limit: Int = 10): [User!]!
 }

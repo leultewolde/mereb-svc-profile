@@ -85,6 +85,17 @@ class FakeUsers implements UserRepositoryPort, ProfileReadRepositoryPort {
     return next;
   }
 
+  async listDiscoverableUsers(input: { viewerId: string; limit: number }): Promise<UserProfileRecord[]> {
+    return Array.from(this.users.values())
+      .filter((user) => user.id !== input.viewerId)
+      .sort((a, b) => {
+        const dateDiff = b.createdAt.getTime() - a.createdAt.getTime();
+        if (dateDiff !== 0) return dateDiff;
+        return b.id.localeCompare(a.id);
+      })
+      .slice(0, input.limit);
+  }
+
   async countUsers(): Promise<number> {
     return this.users.size;
   }
@@ -101,14 +112,14 @@ class FakeUsers implements UserRepositoryPort, ProfileReadRepositoryPort {
 }
 
 class FakeFollows implements FollowRepositoryPort {
-  private readonly edges = new Set<string>();
+  private readonly edges = new Map<string, Date>();
 
   private key(followerId: string, followingId: string) {
     return `${followerId}->${followingId}`;
   }
 
   async upsertFollow(followerId: string, followingId: string): Promise<void> {
-    this.edges.add(this.key(followerId, followingId));
+    this.edges.set(this.key(followerId, followingId), new Date());
   }
 
   async deleteFollowIfExists(followerId: string, followingId: string): Promise<void> {
@@ -116,15 +127,83 @@ class FakeFollows implements FollowRepositoryPort {
   }
 
   async countFollowers(userId: string): Promise<number> {
-    return Array.from(this.edges).filter((edge) => edge.endsWith(`->${userId}`)).length;
+    return Array.from(this.edges.keys()).filter((edge) => edge.endsWith(`->${userId}`)).length;
   }
 
   async countFollowing(userId: string): Promise<number> {
-    return Array.from(this.edges).filter((edge) => edge.startsWith(`${userId}->`)).length;
+    return Array.from(this.edges.keys()).filter((edge) => edge.startsWith(`${userId}->`)).length;
   }
 
   async isFollowing(followerId: string, followingId: string): Promise<boolean> {
     return this.edges.has(this.key(followerId, followingId));
+  }
+
+  async listFollowers(input: {
+    userId: string;
+    cursor?: { createdAt: Date; userId: string };
+    take: number;
+  }) {
+    const rows = Array.from(this.edges.entries())
+      .map(([key, createdAt]) => {
+        const [followerId, followingId] = key.split('->');
+        return { followerId, followingId, createdAt };
+      })
+      .filter((row) => row.followingId === input.userId)
+      .sort((a, b) => {
+        const dateDiff = b.createdAt.getTime() - a.createdAt.getTime();
+        if (dateDiff !== 0) return dateDiff;
+        return b.followerId.localeCompare(a.followerId);
+      });
+
+    const filtered = input.cursor
+      ? rows.filter(
+          (row) =>
+            row.createdAt.getTime() < input.cursor!.createdAt.getTime()
+            || (
+              row.createdAt.getTime() === input.cursor!.createdAt.getTime()
+              && row.followerId < input.cursor!.userId
+            )
+        )
+      : rows;
+
+    return filtered.slice(0, input.take).map((row) => ({
+      user: makeUser({ id: row.followerId, handle: row.followerId }),
+      followedAt: row.createdAt
+    }));
+  }
+
+  async listFollowing(input: {
+    userId: string;
+    cursor?: { createdAt: Date; userId: string };
+    take: number;
+  }) {
+    const rows = Array.from(this.edges.entries())
+      .map(([key, createdAt]) => {
+        const [followerId, followingId] = key.split('->');
+        return { followerId, followingId, createdAt };
+      })
+      .filter((row) => row.followerId === input.userId)
+      .sort((a, b) => {
+        const dateDiff = b.createdAt.getTime() - a.createdAt.getTime();
+        if (dateDiff !== 0) return dateDiff;
+        return b.followingId.localeCompare(a.followingId);
+      });
+
+    const filtered = input.cursor
+      ? rows.filter(
+          (row) =>
+            row.createdAt.getTime() < input.cursor!.createdAt.getTime()
+            || (
+              row.createdAt.getTime() === input.cursor!.createdAt.getTime()
+              && row.followingId < input.cursor!.userId
+            )
+        )
+      : rows;
+
+    return filtered.slice(0, input.take).map((row) => ({
+      user: makeUser({ id: row.followingId, handle: row.followingId }),
+      followedAt: row.createdAt
+    }));
   }
 }
 
@@ -352,6 +431,8 @@ test('profile application commands and queries cover mutations, auth, and metric
   const recentUsers = await module.queries.getAdminRecentUsers.execute({ limit: 999 });
   assert.equal(recentLimit, 50);
   assert.equal(recentUsers[0]?.id, 'target');
+  const discoverUsers = await module.queries.discoverUsers.execute({ viewerId: 'viewer', limit: 2 });
+  assert.equal(discoverUsers.length, 2);
 
   const resolved = await module.queries.resolveUserReference.execute({ id: 'ref-user' });
   assert.equal(resolved.id, 'ref-user');
@@ -371,6 +452,17 @@ test('profile application commands and queries cover mutations, auth, and metric
     }),
     true
   );
+  const followersConnection = await module.queries.getFollowersConnection.execute({
+    userId: 'target',
+    limit: 20
+  });
+  assert.equal(followersConnection.edges.length, 1);
+  assert.equal(followersConnection.pageInfo.hasNextPage, false);
+  const followingConnection = await module.queries.getFollowingConnection.execute({
+    userId: 'viewer',
+    limit: 20
+  });
+  assert.equal(followingConnection.edges.length, 0);
   assert.equal(module.services.avatarUrlResolver.resolve('avatar.png'), 'https://cdn.test/avatar.png');
   assert.equal(module.services.avatarUrlResolver.resolve(null), null);
 });

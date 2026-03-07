@@ -26,6 +26,9 @@ import type {
   ProfileMutationPorts,
   ProfileReadRepositoryPort,
   ProfileTransactionPort,
+  UserConnectionPage,
+  UserConnectionRecord,
+  UserFollowCursor,
   UserRepositoryPort
 } from './ports.js';
 import type {
@@ -111,6 +114,62 @@ function getStartOfWeek(now = new Date()): Date {
   start.setDate(start.getDate() - diff);
   start.setHours(0, 0, 0, 0);
   return start;
+}
+
+function normalizeLimit(limit: number | undefined, fallback: number, max = 50): number {
+  return Math.min(Math.max(limit ?? fallback, 1), max);
+}
+
+function encodeUserFollowCursor(input: UserFollowCursor): string {
+  return Buffer.from(
+    JSON.stringify({
+      createdAt: input.createdAt.toISOString(),
+      userId: input.userId
+    }),
+    'utf8'
+  ).toString('base64url');
+}
+
+function decodeUserFollowCursor(encoded?: string): UserFollowCursor | undefined {
+  if (!encoded) {
+    return undefined;
+  }
+  try {
+    const raw = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')) as {
+      createdAt?: string;
+      userId?: string;
+    };
+    if (!raw.createdAt || !raw.userId) {
+      return undefined;
+    }
+    const createdAt = new Date(raw.createdAt);
+    if (Number.isNaN(createdAt.getTime())) {
+      return undefined;
+    }
+    return {
+      createdAt,
+      userId: raw.userId
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function toUserConnectionPage(rows: UserConnectionRecord[], limit: number): UserConnectionPage {
+  const edges = rows.slice(0, limit).map((row) => ({
+    node: row.user,
+    cursor: encodeUserFollowCursor({
+      createdAt: row.followedAt,
+      userId: row.user.id
+    })
+  }));
+  return {
+    edges,
+    pageInfo: {
+      endCursor: edges.at(-1)?.cursor ?? null,
+      hasNextPage: rows.length > limit
+    }
+  };
 }
 
 export class BootstrapUserUseCase {
@@ -358,8 +417,7 @@ export class GetAdminRecentUsersQuery {
   constructor(private readonly profileRead: ProfileReadRepositoryPort) {}
 
   async execute(input: { limit?: number }): Promise<UserProfileRecord[]> {
-    const limit = Math.min(Math.max(input.limit ?? 10, 1), 50);
-    return this.profileRead.listRecentUsers(limit);
+    return this.profileRead.listRecentUsers(normalizeLimit(input.limit, 10));
   }
 }
 
@@ -405,6 +463,48 @@ export class GetFollowedByViewerQuery {
   }
 }
 
+export class DiscoverUsersQuery {
+  constructor(private readonly users: UserRepositoryPort) {}
+
+  async execute(input: { viewerId?: string; limit?: number }): Promise<UserProfileRecord[]> {
+    if (!input.viewerId) {
+      return [];
+    }
+    return this.users.listDiscoverableUsers({
+      viewerId: input.viewerId,
+      limit: normalizeLimit(input.limit, 8)
+    });
+  }
+}
+
+export class GetFollowersConnectionQuery {
+  constructor(private readonly follows: FollowRepositoryPort) {}
+
+  async execute(input: { userId: string; after?: string; limit?: number }): Promise<UserConnectionPage> {
+    const limit = normalizeLimit(input.limit, 20);
+    const rows = await this.follows.listFollowers({
+      userId: input.userId,
+      cursor: decodeUserFollowCursor(input.after),
+      take: limit + 1
+    });
+    return toUserConnectionPage(rows, limit);
+  }
+}
+
+export class GetFollowingConnectionQuery {
+  constructor(private readonly follows: FollowRepositoryPort) {}
+
+  async execute(input: { userId: string; after?: string; limit?: number }): Promise<UserConnectionPage> {
+    const limit = normalizeLimit(input.limit, 20);
+    const rows = await this.follows.listFollowing({
+      userId: input.userId,
+      cursor: decodeUserFollowCursor(input.after),
+      take: limit + 1
+    });
+    return toUserConnectionPage(rows, limit);
+  }
+}
+
 export class AvatarUrlResolver {
   constructor(private readonly media: MediaUrlSignerPort) {}
 
@@ -426,12 +526,15 @@ export interface ProfileApplicationModule {
   queries: {
     getMe: GetMeQuery;
     getUserByHandle: GetUserByHandleQuery;
+    discoverUsers: DiscoverUsersQuery;
     getAdminUserMetrics: GetAdminUserMetricsQuery;
     getAdminRecentUsers: GetAdminRecentUsersQuery;
     resolveUserReference: ResolveUserReferenceQuery;
     getFollowersCount: GetFollowersCountQuery;
     getFollowingCount: GetFollowingCountQuery;
     getFollowedByViewer: GetFollowedByViewerQuery;
+    getFollowersConnection: GetFollowersConnectionQuery;
+    getFollowingConnection: GetFollowingConnectionQuery;
   };
   services: {
     avatarUrlResolver: AvatarUrlResolver;
@@ -451,12 +554,15 @@ export function createProfileApplicationModule(
     queries: {
       getMe: new GetMeQuery(deps.users),
       getUserByHandle: new GetUserByHandleQuery(deps.users),
+      discoverUsers: new DiscoverUsersQuery(deps.users),
       getAdminUserMetrics: new GetAdminUserMetricsQuery(deps.profileRead),
       getAdminRecentUsers: new GetAdminRecentUsersQuery(deps.profileRead),
       resolveUserReference: new ResolveUserReferenceQuery(deps.users),
       getFollowersCount: new GetFollowersCountQuery(deps.follows),
       getFollowingCount: new GetFollowingCountQuery(deps.follows),
-      getFollowedByViewer: new GetFollowedByViewerQuery(deps.follows)
+      getFollowedByViewer: new GetFollowedByViewerQuery(deps.follows),
+      getFollowersConnection: new GetFollowersConnectionQuery(deps.follows),
+      getFollowingConnection: new GetFollowingConnectionQuery(deps.follows)
     },
     services: {
       avatarUrlResolver: new AvatarUrlResolver(deps.mediaUrlSigner)

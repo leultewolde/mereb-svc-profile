@@ -12,11 +12,33 @@ export interface AdminUserMetrics {
   newUsersThisWeek: number;
 }
 
+export interface UserFollowCursor {
+  createdAt: Date;
+  userId: string;
+}
+
+export interface UserConnectionRecord {
+  user: UserProfileRecord;
+  followedAt: Date;
+}
+
+export interface UserConnectionPage {
+  edges: Array<{
+    node: UserProfileRecord;
+    cursor: string;
+  }>;
+  pageInfo: {
+    endCursor: string | null;
+    hasNextPage: boolean;
+  };
+}
+
 export interface UserRepositoryPort {
   findById(id: string): Promise<UserProfileRecord | null>;
   findByHandle(handle: string): Promise<UserProfileRecord | null>;
   findOrCreateWithFallback(input: BootstrapUserDraft): Promise<UserProfileRecord>;
   upsertProfile(userId: string, patch: UpdateProfilePatch): Promise<UserProfileRecord>;
+  listDiscoverableUsers(input: { viewerId: string; limit: number }): Promise<UserProfileRecord[]>;
 }
 
 export interface FollowRepositoryPort {
@@ -25,6 +47,16 @@ export interface FollowRepositoryPort {
   countFollowers(userId: string): Promise<number>;
   countFollowing(userId: string): Promise<number>;
   isFollowing(followerId: string, followingId: string): Promise<boolean>;
+  listFollowers(input: {
+    userId: string;
+    cursor?: UserFollowCursor;
+    take: number;
+  }): Promise<UserConnectionRecord[]>;
+  listFollowing(input: {
+    userId: string;
+    cursor?: UserFollowCursor;
+    take: number;
+  }): Promise<UserConnectionRecord[]>;
 }
 
 export interface ProfileReadRepositoryPort {

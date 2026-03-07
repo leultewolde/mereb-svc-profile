@@ -57,12 +57,23 @@ function createProfileStub(): ProfileApplicationModule {
     queries: {
       getMe: { async execute() { return null; } },
       getUserByHandle: { async execute() { return null; } },
+      discoverUsers: { async execute() { return []; } },
       getAdminUserMetrics: { async execute() { return { totalUsers: 0, newUsersToday: 0, newUsersThisWeek: 0 }; } },
       getAdminRecentUsers: { async execute() { return []; } },
       resolveUserReference: { async execute() { return null; } },
       getFollowersCount: { async execute() { return 0; } },
       getFollowingCount: { async execute() { return 0; } },
-      getFollowedByViewer: { async execute() { return false; } }
+      getFollowedByViewer: { async execute() { return false; } },
+      getFollowersConnection: {
+        async execute() {
+          return { edges: [], pageInfo: { endCursor: null, hasNextPage: false } };
+        }
+      },
+      getFollowingConnection: {
+        async execute() {
+          return { edges: [], pageInfo: { endCursor: null, hasNextPage: false } };
+        }
+      }
     },
     services: {
       avatarUrlResolver: {
@@ -164,6 +175,12 @@ test('profile resolvers delegate query and user fields to the application module
       return null;
     }
   } as ProfileApplicationModule['queries']['getMe'];
+  profile.commands.bootstrapUser = {
+    async execute(input) {
+      calls.push({ kind: 'bootstrapUser', payload: input });
+      return { created: false, userId: 'viewer' };
+    }
+  } as ProfileApplicationModule['commands']['bootstrapUser'];
   profile.queries.getUserByHandle = {
     async execute(input) {
       calls.push({ kind: 'userByHandle', payload: input });
@@ -248,7 +265,17 @@ test('profile resolvers delegate query and user fields to the application module
   assert.equal(entities[0] !== null, true);
   assert.equal(entities[1], null);
   assert.deepEqual(calls, [
-    { kind: 'me', payload: { principal: { userId: 'viewer' } } },
+    {
+      kind: 'bootstrapUser',
+      payload: {
+        id: 'viewer',
+        preferredHandle: 'viewer',
+        displayName: 'viewer',
+        bio: null,
+        avatarKey: null
+      }
+    },
+    { kind: 'me', payload: { principal: { userId: 'viewer' }, identity: undefined } },
     { kind: 'userByHandle', payload: { handle: 'target' } },
     { kind: 'adminUserMetrics', payload: null },
     { kind: 'adminRecentUsers', payload: { limit: 5 } },
