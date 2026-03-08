@@ -120,6 +120,10 @@ function normalizeLimit(limit: number | undefined, fallback: number, max = 50): 
   return Math.min(Math.max(limit ?? fallback, 1), max);
 }
 
+function normalizeUserSearchQuery(query: string): string {
+  return query.trim().replace(/^@/, '');
+}
+
 function encodeUserFollowCursor(input: UserFollowCursor): string {
   return Buffer.from(
     JSON.stringify({
@@ -399,6 +403,23 @@ export class GetUserByHandleQuery {
   }
 }
 
+export class SearchUsersQuery {
+  constructor(private readonly users: UserRepositoryPort) {}
+
+  async execute(input: { viewerId?: string; query: string; limit?: number }): Promise<UserProfileRecord[]> {
+    const query = normalizeUserSearchQuery(input.query);
+    if (!query) {
+      return [];
+    }
+
+    return this.users.searchUsers({
+      viewerId: input.viewerId,
+      query,
+      limit: normalizeLimit(input.limit, 8)
+    });
+  }
+}
+
 export class GetAdminUserMetricsQuery {
   constructor(private readonly profileRead: ProfileReadRepositoryPort) {}
 
@@ -526,6 +547,7 @@ export interface ProfileApplicationModule {
   queries: {
     getMe: GetMeQuery;
     getUserByHandle: GetUserByHandleQuery;
+    searchUsers: SearchUsersQuery;
     discoverUsers: DiscoverUsersQuery;
     getAdminUserMetrics: GetAdminUserMetricsQuery;
     getAdminRecentUsers: GetAdminRecentUsersQuery;
@@ -554,6 +576,7 @@ export function createProfileApplicationModule(
     queries: {
       getMe: new GetMeQuery(deps.users),
       getUserByHandle: new GetUserByHandleQuery(deps.users),
+      searchUsers: new SearchUsersQuery(deps.users),
       discoverUsers: new DiscoverUsersQuery(deps.users),
       getAdminUserMetrics: new GetAdminUserMetricsQuery(deps.profileRead),
       getAdminRecentUsers: new GetAdminRecentUsersQuery(deps.profileRead),

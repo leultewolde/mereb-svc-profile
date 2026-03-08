@@ -50,6 +50,26 @@ function toUserRecord(input: {
   };
 }
 
+function normalizeUserSearchText(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function scoreUserSearchMatch(
+  user: Pick<UserProfileRecord, 'handle' | 'displayName'>,
+  query: string
+): number {
+  const handle = normalizeUserSearchText(user.handle);
+  const displayName = normalizeUserSearchText(user.displayName);
+
+  if (handle === query) return 0;
+  if (handle.startsWith(query)) return 1;
+  if (displayName === query) return 2;
+  if (displayName.startsWith(query)) return 3;
+  if (handle.includes(query)) return 4;
+  if (displayName.includes(query)) return 5;
+  return 6;
+}
+
 function followCursorWhere(cursor: UserFollowCursor | undefined, idField: 'followerId' | 'followingId'): Prisma.FollowWhereInput | undefined {
   if (!cursor) {
     return undefined;
@@ -76,6 +96,54 @@ export class PrismaUserRepository implements UserRepositoryPort, ProfileReadRepo
   async findByHandle(handle: string): Promise<UserProfileRecord | null> {
     const user = await this.db.user.findUnique({ where: { handle } });
     return user ? toUserRecord(user) : null;
+  }
+
+  async searchUsers(input: { viewerId?: string; query: string; limit: number }): Promise<UserProfileRecord[]> {
+    const normalizedQuery = normalizeUserSearchText(input.query);
+    if (!normalizedQuery) {
+      return [];
+    }
+
+    const users = await this.db.user.findMany({
+      where: {
+        ...(input.viewerId ? { id: { not: input.viewerId } } : {}),
+        OR: [
+          {
+            handle: {
+              contains: normalizedQuery,
+              mode: 'insensitive'
+            }
+          },
+          {
+            displayName: {
+              contains: normalizedQuery,
+              mode: 'insensitive'
+            }
+          }
+        ]
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: Math.max(input.limit * 4, input.limit)
+    });
+
+    return users
+      .map(toUserRecord)
+      .sort((left, right) => {
+        const scoreDiff =
+          scoreUserSearchMatch(left, normalizedQuery) -
+          scoreUserSearchMatch(right, normalizedQuery);
+        if (scoreDiff !== 0) {
+          return scoreDiff;
+        }
+
+        const dateDiff = right.createdAt.getTime() - left.createdAt.getTime();
+        if (dateDiff !== 0) {
+          return dateDiff;
+        }
+
+        return left.handle.localeCompare(right.handle);
+      })
+      .slice(0, input.limit);
   }
 
   async findOrCreateWithFallback(input: BootstrapUserDraft): Promise<UserProfileRecord> {

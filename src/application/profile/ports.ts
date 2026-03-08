@@ -36,6 +36,11 @@ export interface UserConnectionPage {
 export interface UserRepositoryPort {
   findById(id: string): Promise<UserProfileRecord | null>;
   findByHandle(handle: string): Promise<UserProfileRecord | null>;
+  searchUsers(input: {
+    viewerId?: string;
+    query: string;
+    limit: number;
+  }): Promise<UserProfileRecord[]>;
   findOrCreateWithFallback(input: BootstrapUserDraft): Promise<UserProfileRecord>;
   upsertProfile(userId: string, patch: UpdateProfilePatch): Promise<UserProfileRecord>;
   listDiscoverableUsers(input: { viewerId: string; limit: number }): Promise<UserProfileRecord[]>;

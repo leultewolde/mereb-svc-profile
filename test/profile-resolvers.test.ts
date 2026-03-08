@@ -57,6 +57,7 @@ function createProfileStub(): ProfileApplicationModule {
     queries: {
       getMe: { async execute() { return null; } },
       getUserByHandle: { async execute() { return null; } },
+      searchUsers: { async execute() { return []; } },
       discoverUsers: { async execute() { return []; } },
       getAdminUserMetrics: { async execute() { return { totalUsers: 0, newUsersToday: 0, newUsersThisWeek: 0 }; } },
       getAdminRecentUsers: { async execute() { return []; } },
@@ -187,6 +188,12 @@ test('profile resolvers delegate query and user fields to the application module
       return null;
     }
   } as ProfileApplicationModule['queries']['getUserByHandle'];
+  profile.queries.searchUsers = {
+    async execute(input) {
+      calls.push({ kind: 'searchUsers', payload: input });
+      return [];
+    }
+  } as ProfileApplicationModule['queries']['searchUsers'];
   profile.queries.getAdminUserMetrics = {
     async execute() {
       calls.push({ kind: 'adminUserMetrics', payload: null });
@@ -244,6 +251,7 @@ test('profile resolvers delegate query and user fields to the application module
 
   await query.me({}, {}, { userId: 'viewer' });
   await query.userByHandle({}, { handle: 'target' }, {});
+  await query.searchUsers({}, { query: '@tar', limit: 4 }, { userId: 'viewer' });
   await query.adminUserMetrics({}, {}, {});
   await query.adminRecentUsers({}, { limit: 5 }, {});
   const entities = await query._entities(
@@ -277,6 +285,7 @@ test('profile resolvers delegate query and user fields to the application module
     },
     { kind: 'me', payload: { principal: { userId: 'viewer' }, identity: undefined } },
     { kind: 'userByHandle', payload: { handle: 'target' } },
+    { kind: 'searchUsers', payload: { viewerId: 'viewer', query: '@tar', limit: 4 } },
     { kind: 'adminUserMetrics', payload: null },
     { kind: 'adminRecentUsers', payload: { limit: 5 } },
     { kind: 'resolveUserReference', payload: { id: 'u1' } },

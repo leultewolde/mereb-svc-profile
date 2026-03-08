@@ -47,6 +47,7 @@ union _Entity = User
 type Query {
   me: User
   userByHandle(handle: String!): User
+  searchUsers(query: String!, limit: Int = 8): [User!]!
   discoverUsers(limit: Int = 8): [User!]!
   adminUserMetrics: AdminUserMetrics!
   adminRecentUsers(limit: Int = 10): [User!]!

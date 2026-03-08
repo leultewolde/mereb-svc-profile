@@ -33,6 +33,7 @@ function makeUser(partial: Partial<UserProfileRecord> & Pick<UserProfileRecord, 
 
 class FakeUsers implements UserRepositoryPort, ProfileReadRepositoryPort {
   private readonly users = new Map<string, UserProfileRecord>();
+  readonly searchCalls: Array<{ viewerId?: string; query: string; limit: number }> = [];
 
   seed(user: UserProfileRecord) {
     this.users.set(user.id, user);
@@ -44,6 +45,19 @@ class FakeUsers implements UserRepositoryPort, ProfileReadRepositoryPort {
 
   async findByHandle(handle: string): Promise<UserProfileRecord | null> {
     return Array.from(this.users.values()).find((user) => user.handle === handle) ?? null;
+  }
+
+  async searchUsers(input: { viewerId?: string; query: string; limit: number }): Promise<UserProfileRecord[]> {
+    this.searchCalls.push(input);
+    const normalizedQuery = input.query.trim().replace(/^@/, '').toLowerCase();
+    return Array.from(this.users.values())
+      .filter((user) => user.id !== input.viewerId)
+      .filter((user) => {
+        const handle = user.handle.toLowerCase();
+        const displayName = user.displayName.toLowerCase();
+        return handle.includes(normalizedQuery) || displayName.includes(normalizedQuery);
+      })
+      .slice(0, input.limit);
   }
 
   async findOrCreateWithFallback(input: {
@@ -433,6 +447,13 @@ test('profile application commands and queries cover mutations, auth, and metric
   assert.equal(recentUsers[0]?.id, 'target');
   const discoverUsers = await module.queries.discoverUsers.execute({ viewerId: 'viewer', limit: 2 });
   assert.equal(discoverUsers.length, 2);
+  const searchUsers = await module.queries.searchUsers.execute({ viewerId: 'viewer', query: '@tar', limit: 5 });
+  assert.equal(searchUsers[0]?.id, 'target');
+  assert.deepEqual(users.searchCalls.at(-1), {
+    viewerId: 'viewer',
+    query: 'tar',
+    limit: 5
+  });
 
   const resolved = await module.queries.resolveUserReference.execute({ id: 'ref-user' });
   assert.equal(resolved.id, 'ref-user');
