@@ -73,6 +73,7 @@ configMap:
     PORT: "4001"
     PROFILE_EVENTS_ENABLED: "true"
     MEDIA_SERVICE_URL: http://svc-media.apps-prd.svc.cluster.local
+    MEDIA_CDN_ORIGIN: https://uploads.mereb.app/media
     KAFKA_BROKERS: platform-prd-redpanda-0.platform-prd-redpanda.platform-prd.svc.cluster.local:9092,platform-prd-redpanda-1.platform-prd-redpanda.platform-prd.svc.cluster.local:9092,platform-prd-redpanda-2.platform-prd-redpanda.platform-prd.svc.cluster.local:9092
     KAFKA_SSL: "true"
     KAFKA_SSL_INSECURE: "true"

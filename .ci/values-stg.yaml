@@ -67,6 +67,7 @@ configMap:
     PORT: "4001"
     PROFILE_EVENTS_ENABLED: "true"
     MEDIA_SERVICE_URL: http://svc-media-stg.apps-stg.svc.cluster.local
+    MEDIA_CDN_ORIGIN: https://uploads-stg.mereb.app/media-stg
     KAFKA_BROKERS: platform-stg-redpanda-0.platform-stg-redpanda.platform-stg.svc.cluster.local:9092
     KAFKA_SSL: "true"
     KAFKA_SSL_INSECURE: "true"
