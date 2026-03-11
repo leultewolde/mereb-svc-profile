@@ -11,6 +11,18 @@ export class AuthenticationRequiredError extends ProfileDomainError {
   }
 }
 
+export class AuthorizationRequiredError extends ProfileDomainError {
+  constructor() {
+    super('FORBIDDEN', 'Administrator access required');
+  }
+}
+
+export class ProfileUserNotFoundError extends ProfileDomainError {
+  constructor() {
+    super('USER_NOT_FOUND', 'User not found');
+  }
+}
+
 export class CannotFollowSelfError extends ProfileDomainError {
   constructor() {
     super('CANNOT_FOLLOW_SELF', 'A user cannot follow themselves');

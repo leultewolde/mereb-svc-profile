@@ -2,7 +2,9 @@ export const PROFILE_EVENT_TOPICS = {
   userBootstrapped: 'profile.user.bootstrapped.v1',
   userUpdated: 'profile.user.updated.v1',
   userFollowed: 'profile.user.followed.v1',
-  userUnfollowed: 'profile.user.unfollowed.v1'
+  userUnfollowed: 'profile.user.unfollowed.v1',
+  userDeactivated: 'profile.user.deactivated.v1',
+  userReactivated: 'profile.user.reactivated.v1'
 } as const;
 
 export type ProfileEventTopic =
@@ -28,11 +30,21 @@ export interface ProfileUserUnfollowedEventData {
   following_id: string;
 }
 
+export interface ProfileUserDeactivatedEventData {
+  user_id: string;
+}
+
+export interface ProfileUserReactivatedEventData {
+  user_id: string;
+}
+
 export type ProfileIntegrationEventData =
   | ProfileUserBootstrappedEventData
   | ProfileUserUpdatedEventData
   | ProfileUserFollowedEventData
-  | ProfileUserUnfollowedEventData;
+  | ProfileUserUnfollowedEventData
+  | ProfileUserDeactivatedEventData
+  | ProfileUserReactivatedEventData;
 
 export interface ProfileIntegrationEventRequest<TData = ProfileIntegrationEventData> {
   topic: ProfileEventTopic;

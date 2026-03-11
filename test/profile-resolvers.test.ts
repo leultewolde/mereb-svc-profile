@@ -252,8 +252,8 @@ test('profile resolvers delegate query and user fields to the application module
   await query.me({}, {}, { userId: 'viewer' });
   await query.userByHandle({}, { handle: 'target' }, {});
   await query.searchUsers({}, { query: '@tar', limit: 4 }, { userId: 'viewer' });
-  await query.adminUserMetrics({}, {}, {});
-  await query.adminRecentUsers({}, { limit: 5 }, {});
+  await query.adminUserMetrics({}, {}, { roles: ['admin'] });
+  await query.adminRecentUsers({}, { limit: 5 }, { roles: ['admin'] });
   const entities = await query._entities(
     {},
     { representations: [{ __typename: 'User', id: 'u1' }, { __typename: 'Unknown' }] },
@@ -283,7 +283,7 @@ test('profile resolvers delegate query and user fields to the application module
         avatarKey: null
       }
     },
-    { kind: 'me', payload: { principal: { userId: 'viewer' }, identity: undefined } },
+    { kind: 'me', payload: { principal: { userId: 'viewer', roles: [] }, identity: undefined } },
     { kind: 'userByHandle', payload: { handle: 'target' } },
     { kind: 'searchUsers', payload: { viewerId: 'viewer', query: '@tar', limit: 4 } },
     { kind: 'adminUserMetrics', payload: null },

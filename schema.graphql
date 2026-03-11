@@ -42,6 +42,39 @@ type AdminUserMetrics {
   newUsersThisWeek: Int!
 }
 
+enum AdminUserStatus {
+  ACTIVE
+  DEACTIVATED
+}
+
+type AdminUser {
+  id: ID!
+  handle: String!
+  displayName: String!
+  bio: String
+  avatarUrl: String
+  createdAt: String!
+  status: AdminUserStatus!
+  deactivatedAt: String
+  followersCount: Int!
+  followingCount: Int!
+}
+
+type AdminUserEdge {
+  node: AdminUser!
+  cursor: String!
+}
+
+type AdminUserPageInfo {
+  endCursor: String
+  hasNextPage: Boolean!
+}
+
+type AdminUserConnection {
+  edges: [AdminUserEdge!]!
+  pageInfo: AdminUserPageInfo!
+}
+
 union _Entity = User
 
 type Query {
@@ -50,13 +83,16 @@ type Query {
   searchUsers(query: String!, limit: Int = 8): [User!]!
   discoverUsers(limit: Int = 8): [User!]!
   adminUserMetrics: AdminUserMetrics!
-  adminRecentUsers(limit: Int = 10): [User!]!
+  adminRecentUsers(limit: Int = 10): [AdminUser!]!
+  adminUsers(query: String, status: AdminUserStatus, after: String, limit: Int = 20): AdminUserConnection!
 }
 
 type Mutation {
   updateProfile(displayName: String, bio: String, avatarKey: String, avatarAssetId: ID): User!
   followUser(userId: ID!): User!
   unfollowUser(userId: ID!): User!
+  adminDeactivateUser(userId: ID!): AdminUser!
+  adminReactivateUser(userId: ID!): AdminUser!
 }
 
 extend type Query {

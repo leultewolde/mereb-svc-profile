@@ -8,5 +8,6 @@ export interface IdentityHints {
 
 export interface GraphQLContext {
   userId?: string;
+  roles?: string[];
   identity?: IdentityHints;
 }

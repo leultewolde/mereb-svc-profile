@@ -11,6 +11,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   createFastifyLoggerOptions,
+  extractJwtRoles,
   getEnv,
   loadEnv,
   parseAuthHeader,
@@ -84,6 +85,7 @@ export async function buildServer(): Promise<FastifyInstance> {
     const token = parseAuthHeader(request.headers);
     if (!token) {
       request.userId = undefined;
+      request.roles = [];
       request.identityHints = undefined;
       return;
     }
@@ -91,10 +93,12 @@ export async function buildServer(): Promise<FastifyInstance> {
     try {
       const payload = (await verifyJwt(token, { issuer, audience })) as JwtIdentityPayload;
       request.userId = payload.sub;
+      request.roles = extractJwtRoles(payload);
       request.identityHints = extractIdentityHints(payload);
     } catch (error) {
       request.log.warn({ err: error }, 'JWT verification failed');
       request.userId = undefined;
+      request.roles = [];
       request.identityHints = undefined;
     }
   });
@@ -108,7 +112,11 @@ export async function buildServer(): Promise<FastifyInstance> {
     schema,
     graphiql: process.env.NODE_ENV !== 'production',
     federationMetadata: true,
-    context: (request): GraphQLContext => ({ userId: request.userId, identity: request.identityHints })
+    context: (request): GraphQLContext => ({
+      userId: request.userId,
+      roles: request.roles ?? [],
+      identity: request.identityHints
+    })
   });
 
   await registerBootstrapUsersRoute(

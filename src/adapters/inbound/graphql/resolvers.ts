@@ -3,11 +3,13 @@ import { GraphQLScalarType, Kind, type ValueNode } from 'graphql';
 import type { GraphQLContext } from '../../../context.js';
 import {
   AuthenticationRequiredError,
+  AuthorizationRequiredError,
   CannotFollowSelfError,
   CannotUnfollowSelfError,
-  InvalidMediaAssetError
+  InvalidMediaAssetError,
+  ProfileUserNotFoundError
 } from '../../../domain/profile/errors.js';
-import type { UserProfileRecord } from '../../../domain/profile/user-profile.js';
+import type { AdminUserRecord, UserProfileRecord } from '../../../domain/profile/user-profile.js';
 import type { ProfileApplicationModule } from '../../../application/profile/use-cases.js';
 import type { ExecutionContext } from '../../../application/profile/context.js';
 
@@ -48,12 +50,13 @@ const AnyScalar = new GraphQLScalarType({
 });
 
 function toExecutionContext(ctx: GraphQLContext): ExecutionContext {
-  return ctx.userId
-    ? {
-        principal: { userId: ctx.userId },
-        identity: ctx.identity
-      }
-    : {};
+  return {
+    principal:
+      ctx.userId || (ctx.roles?.length ?? 0) > 0
+        ? { userId: ctx.userId, roles: ctx.roles ?? [] }
+        : undefined,
+    identity: ctx.identity
+  };
 }
 
 function collapseNameParts(parts: Array<string | undefined>): string | undefined {
@@ -98,6 +101,9 @@ function toGraphQLError(error: unknown): never {
   if (error instanceof AuthenticationRequiredError) {
     throw new Error('UNAUTHENTICATED');
   }
+  if (error instanceof AuthorizationRequiredError) {
+    throw new Error('FORBIDDEN');
+  }
   if (error instanceof CannotFollowSelfError) {
     throw new Error('CANNOT_FOLLOW_SELF');
   }
@@ -105,6 +111,9 @@ function toGraphQLError(error: unknown): never {
     throw new Error('CANNOT_UNFOLLOW_SELF');
   }
   if (error instanceof InvalidMediaAssetError) {
+    throw new Error(error.code);
+  }
+  if (error instanceof ProfileUserNotFoundError) {
     throw new Error(error.code);
   }
 
@@ -162,6 +171,24 @@ export function createResolvers(
       createdAt: (user: unknown) =>
         (user as UserProfileRecord).createdAt.toISOString()
     },
+    AdminUser: {
+      avatarUrl: (user: unknown) =>
+        profile.services.avatarUrlResolver.resolve(
+          (user as AdminUserRecord).avatarKey
+        ),
+      followersCount: (user: unknown) =>
+        profile.queries.getFollowersCount.execute({
+          userId: (user as AdminUserRecord).id
+        }),
+      followingCount: (user: unknown) =>
+        profile.queries.getFollowingCount.execute({
+          userId: (user as AdminUserRecord).id
+        }),
+      createdAt: (user: unknown) =>
+        (user as AdminUserRecord).createdAt.toISOString(),
+      deactivatedAt: (user: unknown) =>
+        (user as AdminUserRecord).deactivatedAt?.toISOString() ?? null
+    },
     Query: {
       me: async (_source: unknown, _args: unknown, ctx: GraphQLContext) => {
         await ensureViewerBootstrapped(profile, ctx);
@@ -180,9 +207,24 @@ export function createResolvers(
           viewerId: ctx.userId,
           limit: args.limit
         }),
-      adminUserMetrics: () => profile.queries.getAdminUserMetrics.execute(),
-      adminRecentUsers: (_source: unknown, args: { limit?: number }) =>
-        profile.queries.getAdminRecentUsers.execute({ limit: args.limit }),
+      adminUserMetrics: (_source: unknown, _args: unknown, ctx: GraphQLContext) =>
+        profile.queries.getAdminUserMetrics.execute(toExecutionContext(ctx)),
+      adminRecentUsers: (_source: unknown, args: { limit?: number }, ctx: GraphQLContext) =>
+        profile.queries.getAdminRecentUsers.execute({ limit: args.limit }, toExecutionContext(ctx)),
+      adminUsers: (
+        _source: unknown,
+        args: { query?: string; status?: 'ACTIVE' | 'DEACTIVATED'; after?: string; limit?: number },
+        ctx: GraphQLContext
+      ) =>
+        profile.queries.getAdminUsers.execute(
+          {
+            query: args.query,
+            status: args.status,
+            after: args.after,
+            limit: args.limit
+          },
+          toExecutionContext(ctx)
+        ),
       _entities: async (
         _source: unknown,
         args: { representations: Array<{ __typename?: string }> }
@@ -248,6 +290,34 @@ export function createResolvers(
       ) => {
         try {
           return await profile.commands.unfollowUser.execute(
+            { userId: args.userId },
+            toExecutionContext(ctx)
+          );
+        } catch (error) {
+          toGraphQLError(error);
+        }
+      },
+      adminDeactivateUser: async (
+        _source: unknown,
+        args: { userId: string },
+        ctx: GraphQLContext
+      ) => {
+        try {
+          return await profile.commands.adminDeactivateUser.execute(
+            { userId: args.userId },
+            toExecutionContext(ctx)
+          );
+        } catch (error) {
+          toGraphQLError(error);
+        }
+      },
+      adminReactivateUser: async (
+        _source: unknown,
+        args: { userId: string },
+        ctx: GraphQLContext
+      ) => {
+        try {
+          return await profile.commands.adminReactivateUser.execute(
             { userId: args.userId },
             toExecutionContext(ctx)
           );

@@ -1,5 +1,7 @@
 import type { IntegrationEventEnvelope } from '@mereb/shared-packages';
 import type {
+  AdminUserRecord,
+  AdminUserStatus,
   BootstrapUserDraft,
   UpdateProfilePatch,
   UserProfileRecord
@@ -33,9 +35,26 @@ export interface UserConnectionPage {
   };
 }
 
+export interface AdminUserCursor {
+  createdAt: Date;
+  userId: string;
+}
+
+export interface AdminUserConnectionPage {
+  edges: Array<{
+    node: AdminUserRecord;
+    cursor: string;
+  }>;
+  pageInfo: {
+    endCursor: string | null;
+    hasNextPage: boolean;
+  };
+}
+
 export interface UserRepositoryPort {
   findById(id: string): Promise<UserProfileRecord | null>;
   findByHandle(handle: string): Promise<UserProfileRecord | null>;
+  findAdminById(id: string): Promise<AdminUserRecord | null>;
   searchUsers(input: {
     viewerId?: string;
     query: string;
@@ -44,6 +63,10 @@ export interface UserRepositoryPort {
   findOrCreateWithFallback(input: BootstrapUserDraft): Promise<UserProfileRecord>;
   upsertProfile(userId: string, patch: UpdateProfilePatch): Promise<UserProfileRecord>;
   listDiscoverableUsers(input: { viewerId: string; limit: number }): Promise<UserProfileRecord[]>;
+  updateAdminStatus(input: {
+    userId: string;
+    status: AdminUserStatus;
+  }): Promise<AdminUserRecord | null>;
 }
 
 export interface FollowRepositoryPort {
@@ -67,7 +90,13 @@ export interface FollowRepositoryPort {
 export interface ProfileReadRepositoryPort {
   countUsers(): Promise<number>;
   countUsersCreatedSince(since: Date): Promise<number>;
-  listRecentUsers(limit: number): Promise<UserProfileRecord[]>;
+  listRecentUsers(limit: number): Promise<AdminUserRecord[]>;
+  listAdminUsers(input: {
+    query?: string;
+    status?: AdminUserStatus;
+    cursor?: AdminUserCursor;
+    take: number;
+  }): Promise<AdminUserRecord[]>;
 }
 
 export interface MediaUrlSignerPort {

@@ -9,6 +9,13 @@ export interface UserProfileRecord {
   createdAt: Date;
 }
 
+export type AdminUserStatus = 'ACTIVE' | 'DEACTIVATED';
+
+export interface AdminUserRecord extends UserProfileRecord {
+  status: AdminUserStatus;
+  deactivatedAt: Date | null;
+}
+
 export interface BootstrapUserDraft {
   id: string;
   preferredHandle?: string | null;

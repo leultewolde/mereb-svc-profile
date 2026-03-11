@@ -4,6 +4,7 @@ import {
   createProfileApplicationModule
 } from '../src/application/profile/use-cases.js';
 import type {
+  AdminUserCursor,
   EventPublisherPort,
   FollowRepositoryPort,
   MediaAssetResolverPort,
@@ -14,28 +15,31 @@ import type {
 } from '../src/application/profile/ports.js';
 import {
   AuthenticationRequiredError,
+  AuthorizationRequiredError,
   CannotFollowSelfError,
   CannotUnfollowSelfError,
   InvalidMediaAssetError
 } from '../src/domain/profile/errors.js';
-import type { UserProfileRecord } from '../src/domain/profile/user-profile.js';
+import type { AdminUserRecord, UserProfileRecord } from '../src/domain/profile/user-profile.js';
 
-function makeUser(partial: Partial<UserProfileRecord> & Pick<UserProfileRecord, 'id'>): UserProfileRecord {
+function makeUser(partial: Partial<AdminUserRecord> & Pick<AdminUserRecord, 'id'>): AdminUserRecord {
   return {
     id: partial.id,
     handle: partial.handle ?? `handle_${partial.id}`,
     displayName: partial.displayName ?? partial.id,
     bio: partial.bio ?? null,
     avatarKey: partial.avatarKey ?? null,
-    createdAt: partial.createdAt ?? new Date('2026-01-01T00:00:00.000Z')
+    createdAt: partial.createdAt ?? new Date('2026-01-01T00:00:00.000Z'),
+    status: partial.status ?? 'ACTIVE',
+    deactivatedAt: partial.deactivatedAt ?? null
   };
 }
 
 class FakeUsers implements UserRepositoryPort, ProfileReadRepositoryPort {
-  private readonly users = new Map<string, UserProfileRecord>();
+  private readonly users = new Map<string, AdminUserRecord>();
   readonly searchCalls: Array<{ viewerId?: string; query: string; limit: number }> = [];
 
-  seed(user: UserProfileRecord) {
+  seed(user: AdminUserRecord) {
     this.users.set(user.id, user);
   }
 
@@ -44,13 +48,18 @@ class FakeUsers implements UserRepositoryPort, ProfileReadRepositoryPort {
   }
 
   async findByHandle(handle: string): Promise<UserProfileRecord | null> {
-    return Array.from(this.users.values()).find((user) => user.handle === handle) ?? null;
+    return Array.from(this.users.values()).find((user) => user.status === 'ACTIVE' && user.handle === handle) ?? null;
+  }
+
+  async findAdminById(id: string): Promise<AdminUserRecord | null> {
+    return this.users.get(id) ?? null;
   }
 
   async searchUsers(input: { viewerId?: string; query: string; limit: number }): Promise<UserProfileRecord[]> {
     this.searchCalls.push(input);
     const normalizedQuery = input.query.trim().replace(/^@/, '').toLowerCase();
     return Array.from(this.users.values())
+      .filter((user) => user.status === 'ACTIVE')
       .filter((user) => user.id !== input.viewerId)
       .filter((user) => {
         const handle = user.handle.toLowerCase();
@@ -93,7 +102,9 @@ class FakeUsers implements UserRepositoryPort, ProfileReadRepositoryPort {
       displayName: patch.displayName ?? existing?.displayName ?? 'New User',
       bio: patch.bio === undefined ? (existing?.bio ?? null) : patch.bio,
       avatarKey:
-        patch.avatarKey === undefined ? (existing?.avatarKey ?? null) : patch.avatarKey
+        patch.avatarKey === undefined ? (existing?.avatarKey ?? null) : patch.avatarKey,
+      status: existing?.status ?? 'ACTIVE',
+      deactivatedAt: existing?.deactivatedAt ?? null
     });
     this.users.set(userId, next);
     return next;
@@ -101,6 +112,7 @@ class FakeUsers implements UserRepositoryPort, ProfileReadRepositoryPort {
 
   async listDiscoverableUsers(input: { viewerId: string; limit: number }): Promise<UserProfileRecord[]> {
     return Array.from(this.users.values())
+      .filter((user) => user.status === 'ACTIVE')
       .filter((user) => user.id !== input.viewerId)
       .sort((a, b) => {
         const dateDiff = b.createdAt.getTime() - a.createdAt.getTime();
@@ -108,6 +120,23 @@ class FakeUsers implements UserRepositoryPort, ProfileReadRepositoryPort {
         return b.id.localeCompare(a.id);
       })
       .slice(0, input.limit);
+  }
+
+  async updateAdminStatus(input: {
+    userId: string;
+    status: 'ACTIVE' | 'DEACTIVATED';
+  }): Promise<AdminUserRecord | null> {
+    const existing = this.users.get(input.userId);
+    if (!existing) {
+      return null;
+    }
+    const updated = {
+      ...existing,
+      status: input.status,
+      deactivatedAt: input.status === 'DEACTIVATED' ? new Date('2026-01-06T00:00:00.000Z') : null
+    };
+    this.users.set(input.userId, updated);
+    return updated;
   }
 
   async countUsers(): Promise<number> {
@@ -118,10 +147,47 @@ class FakeUsers implements UserRepositoryPort, ProfileReadRepositoryPort {
     return Array.from(this.users.values()).filter((user) => user.createdAt >= since).length;
   }
 
-  async listRecentUsers(limit: number): Promise<UserProfileRecord[]> {
+  async listRecentUsers(limit: number): Promise<AdminUserRecord[]> {
     return Array.from(this.users.values())
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
       .slice(0, limit);
+  }
+
+  async listAdminUsers(input: {
+    query?: string;
+    status?: 'ACTIVE' | 'DEACTIVATED';
+    cursor?: AdminUserCursor;
+    take: number;
+  }): Promise<AdminUserRecord[]> {
+    const normalizedQuery = input.query?.trim().toLowerCase();
+    const rows = Array.from(this.users.values())
+      .filter((user) => (input.status ? user.status === input.status : true))
+      .filter((user) => {
+        if (!normalizedQuery) return true;
+        return (
+          user.id.toLowerCase().includes(normalizedQuery)
+          || user.handle.toLowerCase().includes(normalizedQuery)
+          || user.displayName.toLowerCase().includes(normalizedQuery)
+        );
+      })
+      .sort((a, b) => {
+        const dateDiff = b.createdAt.getTime() - a.createdAt.getTime();
+        if (dateDiff !== 0) return dateDiff;
+        return b.id.localeCompare(a.id);
+      });
+
+    const filtered = input.cursor
+      ? rows.filter(
+          (user) =>
+            user.createdAt.getTime() < input.cursor!.createdAt.getTime()
+            || (
+              user.createdAt.getTime() === input.cursor!.createdAt.getTime()
+              && user.id < input.cursor!.userId
+            )
+        )
+      : rows;
+
+    return filtered.slice(0, input.take);
   }
 }
 
@@ -311,7 +377,7 @@ test('followUser publishes integration event and returns target user', async () 
 
   const user = await module.commands.followUser.execute(
     { userId: 'target' },
-    { principal: { userId: 'viewer' }, correlationId: 'c1' }
+    { principal: { userId: 'viewer', roles: [] }, correlationId: 'c1' }
   );
 
   assert.equal(user.id, 'target');
@@ -358,7 +424,8 @@ test('profile application commands and queries cover mutations, auth, and metric
     listRecentUsers: async (limit) => {
       recentLimit = limit;
       return users.listRecentUsers(limit);
-    }
+    },
+    listAdminUsers: (input) => users.listAdminUsers(input)
   };
 
   let transactionCount = 0;
@@ -397,7 +464,7 @@ test('profile application commands and queries cover mutations, auth, and metric
   const updated = await module.commands.updateProfile.execute(
     { displayName: 'Viewer Updated', bio: 'bio', avatarKey: 'next.png' },
     {
-      principal: { userId: 'viewer' },
+      principal: { userId: 'viewer', roles: [] },
       correlationId: 'corr-1',
       causationId: 'cause-1',
       tenantId: 'tenant-1'
@@ -408,7 +475,7 @@ test('profile application commands and queries cover mutations, auth, and metric
 
   const unfollowed = await module.commands.unfollowUser.execute(
     { userId: 'target' },
-    { principal: { userId: 'viewer' }, correlationId: 'corr-2' }
+    { principal: { userId: 'viewer', roles: [] }, correlationId: 'corr-2' }
   );
   assert.equal(unfollowed.id, 'target');
   assert.equal(await follows.isFollowing('viewer', 'target'), false);
@@ -424,7 +491,7 @@ test('profile application commands and queries cover mutations, auth, and metric
   );
 
   assert.equal(
-    (await module.queries.getMe.execute({ principal: { userId: 'viewer' } }))?.id,
+    (await module.queries.getMe.execute({ principal: { userId: 'viewer', roles: [] } }))?.id,
     'viewer'
   );
   assert.equal(await module.queries.getMe.execute({}), null);
@@ -434,6 +501,7 @@ test('profile application commands and queries cover mutations, auth, and metric
   );
 
   const metrics = await module.queries.getAdminUserMetrics.execute(
+    { principal: { userId: 'admin-1', roles: ['admin'] } },
     new Date('2026-01-05T12:00:00.000Z')
   );
   assert.deepEqual(metrics, {
@@ -442,9 +510,18 @@ test('profile application commands and queries cover mutations, auth, and metric
     newUsersThisWeek: 1
   });
 
-  const recentUsers = await module.queries.getAdminRecentUsers.execute({ limit: 999 });
+  const recentUsers = await module.queries.getAdminRecentUsers.execute(
+    { limit: 999 },
+    { principal: { userId: 'admin-1', roles: ['admin'] } }
+  );
   assert.equal(recentLimit, 50);
   assert.equal(recentUsers[0]?.id, 'target');
+  const adminUsers = await module.queries.getAdminUsers.execute(
+    { query: 'viewer', status: 'ACTIVE', limit: 5 },
+    { principal: { userId: 'admin-1', roles: ['admin'] } }
+  );
+  assert.equal(adminUsers.edges[0]?.node.id, 'viewer');
+  assert.equal(adminUsers.pageInfo.hasNextPage, false);
   const discoverUsers = await module.queries.discoverUsers.execute({ viewerId: 'viewer', limit: 2 });
   assert.equal(discoverUsers.length, 2);
   const searchUsers = await module.queries.searchUsers.execute({ viewerId: 'viewer', query: '@tar', limit: 5 });
@@ -486,6 +563,21 @@ test('profile application commands and queries cover mutations, auth, and metric
   assert.equal(followingConnection.edges.length, 0);
   assert.equal(module.services.avatarUrlResolver.resolve('avatar.png'), 'https://cdn.test/avatar.png');
   assert.equal(module.services.avatarUrlResolver.resolve(null), null);
+
+  const deactivated = await module.commands.adminDeactivateUser.execute(
+    { userId: 'target' },
+    { principal: { userId: 'admin-1', roles: ['admin'] }, correlationId: 'corr-3' }
+  );
+  assert.equal(deactivated.status, 'DEACTIVATED');
+  const reactivated = await module.commands.adminReactivateUser.execute(
+    { userId: 'target' },
+    { principal: { userId: 'admin-1', roles: ['admin'] }, correlationId: 'corr-4' }
+  );
+  assert.equal(reactivated.status, 'ACTIVE');
+  assert.deepEqual(
+    events.published.slice(-2).map((event) => event.topic),
+    ['profile.user.deactivated.v1', 'profile.user.reactivated.v1']
+  );
 });
 
 test('profile application surfaces auth and self-follow domain errors', async () => {
@@ -505,12 +597,16 @@ test('profile application surfaces auth and self-follow domain errors', async ()
     (error) => error instanceof AuthenticationRequiredError
   );
   await assert.rejects(
-    () => module.commands.followUser.execute({ userId: 'viewer' }, { principal: { userId: 'viewer' } }),
+    () => module.commands.followUser.execute({ userId: 'viewer' }, { principal: { userId: 'viewer', roles: [] } }),
     (error) => error instanceof CannotFollowSelfError
   );
   await assert.rejects(
-    () => module.commands.unfollowUser.execute({ userId: 'viewer' }, { principal: { userId: 'viewer' } }),
+    () => module.commands.unfollowUser.execute({ userId: 'viewer' }, { principal: { userId: 'viewer', roles: [] } }),
     (error) => error instanceof CannotUnfollowSelfError
+  );
+  await assert.rejects(
+    () => module.queries.getAdminUserMetrics.execute({ principal: { userId: 'viewer', roles: [] } }),
+    (error) => error instanceof AuthorizationRequiredError
   );
 });
 

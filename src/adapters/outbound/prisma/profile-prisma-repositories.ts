@@ -1,5 +1,6 @@
 import type { IntegrationEventEnvelope } from '@mereb/shared-packages';
 import type {
+  AdminUserCursor,
   EventPublisherPort,
   FollowRepositoryPort,
   ProfileMutationPorts,
@@ -14,12 +15,19 @@ import {
   buildBootstrapUserDraft,
   buildProfileUpsertCreate,
   deriveHandle,
+  type AdminUserRecord,
+  type AdminUserStatus,
   type BootstrapUserDraft,
   type UpdateProfilePatch,
   type UserProfileRecord
 } from '../../../domain/profile/user-profile.js';
 import { prisma } from '../../../prisma.js';
-import { OutboxStatus, type Prisma, type PrismaClient } from '../../../../generated/client/index.js';
+import {
+  OutboxStatus,
+  type Prisma,
+  type PrismaClient,
+  UserStatus
+} from '../../../../generated/client/index.js';
 
 type ProfilePrismaDb = PrismaClient | Prisma.TransactionClient;
 
@@ -47,6 +55,23 @@ function toUserRecord(input: {
     bio: input.bio,
     avatarKey: input.avatarKey,
     createdAt: input.createdAt
+  };
+}
+
+function toAdminUserRecord(input: {
+  id: string;
+  handle: string;
+  displayName: string;
+  bio: string | null;
+  avatarKey: string | null;
+  createdAt: Date;
+  status: UserStatus;
+  deactivatedAt: Date | null;
+}): AdminUserRecord {
+  return {
+    ...toUserRecord(input),
+    status: input.status,
+    deactivatedAt: input.deactivatedAt
   };
 }
 
@@ -85,17 +110,47 @@ function followCursorWhere(cursor: UserFollowCursor | undefined, idField: 'follo
   };
 }
 
+function adminUserCursorWhere(cursor: AdminUserCursor | undefined): Prisma.UserWhereInput | undefined {
+  if (!cursor) {
+    return undefined;
+  }
+  return {
+    OR: [
+      { createdAt: { lt: cursor.createdAt } },
+      {
+        createdAt: cursor.createdAt,
+        id: { lt: cursor.userId }
+      }
+    ]
+  };
+}
+
 export class PrismaUserRepository implements UserRepositoryPort, ProfileReadRepositoryPort {
   constructor(private readonly db: ProfilePrismaDb = prisma) {}
 
   async findById(id: string): Promise<UserProfileRecord | null> {
-    const user = await this.db.user.findUnique({ where: { id } });
+    const user = await this.db.user.findFirst({
+      where: {
+        id,
+        status: UserStatus.ACTIVE
+      }
+    });
     return user ? toUserRecord(user) : null;
   }
 
   async findByHandle(handle: string): Promise<UserProfileRecord | null> {
-    const user = await this.db.user.findUnique({ where: { handle } });
+    const user = await this.db.user.findFirst({
+      where: {
+        handle,
+        status: UserStatus.ACTIVE
+      }
+    });
     return user ? toUserRecord(user) : null;
+  }
+
+  async findAdminById(id: string): Promise<AdminUserRecord | null> {
+    const user = await this.db.user.findUnique({ where: { id } });
+    return user ? toAdminUserRecord(user) : null;
   }
 
   async searchUsers(input: { viewerId?: string; query: string; limit: number }): Promise<UserProfileRecord[]> {
@@ -106,6 +161,7 @@ export class PrismaUserRepository implements UserRepositoryPort, ProfileReadRepo
 
     const users = await this.db.user.findMany({
       where: {
+        status: UserStatus.ACTIVE,
         ...(input.viewerId ? { id: { not: input.viewerId } } : {}),
         OR: [
           {
@@ -198,6 +254,7 @@ export class PrismaUserRepository implements UserRepositoryPort, ProfileReadRepo
   async listDiscoverableUsers(input: { viewerId: string; limit: number }): Promise<UserProfileRecord[]> {
     const users = await this.db.user.findMany({
       where: {
+        status: UserStatus.ACTIVE,
         id: { not: input.viewerId },
         followers: {
           none: {
@@ -211,6 +268,27 @@ export class PrismaUserRepository implements UserRepositoryPort, ProfileReadRepo
     return users.map(toUserRecord);
   }
 
+  async updateAdminStatus(input: {
+    userId: string;
+    status: AdminUserStatus;
+  }): Promise<AdminUserRecord | null> {
+    try {
+      const updated = await this.db.user.update({
+        where: { id: input.userId },
+        data: {
+          status: input.status,
+          deactivatedAt: input.status === 'DEACTIVATED' ? new Date() : null
+        }
+      });
+      return toAdminUserRecord(updated);
+    } catch (error) {
+      if (isPrismaCode(error, 'P2025')) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
   async countUsersCreatedSince(since: Date): Promise<number> {
     return this.db.user.count({
       where: {
@@ -219,12 +297,40 @@ export class PrismaUserRepository implements UserRepositoryPort, ProfileReadRepo
     });
   }
 
-  async listRecentUsers(limit: number): Promise<UserProfileRecord[]> {
+  async listRecentUsers(limit: number): Promise<AdminUserRecord[]> {
     const users = await this.db.user.findMany({
       orderBy: { createdAt: 'desc' },
       take: limit
     });
-    return users.map(toUserRecord);
+    return users.map(toAdminUserRecord);
+  }
+
+  async listAdminUsers(input: {
+    query?: string;
+    status?: AdminUserStatus;
+    cursor?: AdminUserCursor;
+    take: number;
+  }): Promise<AdminUserRecord[]> {
+    const normalizedQuery = normalizeUserSearchText(input.query ?? '');
+    const users = await this.db.user.findMany({
+      where: {
+        ...(input.status ? { status: input.status } : {}),
+        ...(normalizedQuery
+          ? {
+              OR: [
+                { id: { contains: normalizedQuery, mode: 'insensitive' } },
+                { handle: { contains: normalizedQuery, mode: 'insensitive' } },
+                { displayName: { contains: normalizedQuery, mode: 'insensitive' } }
+              ]
+            }
+          : {}),
+        ...adminUserCursorWhere(input.cursor)
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: input.take
+    });
+
+    return users.map(toAdminUserRecord);
   }
 }
 
@@ -267,7 +373,12 @@ export class PrismaFollowRepository implements FollowRepositoryPort {
   async countFollowers(userId: string): Promise<number> {
     return this.db.follow.count({
       where: {
-        followingId: userId
+        followingId: userId,
+        follower: {
+          is: {
+            status: UserStatus.ACTIVE
+          }
+        }
       }
     });
   }
@@ -275,7 +386,12 @@ export class PrismaFollowRepository implements FollowRepositoryPort {
   async countFollowing(userId: string): Promise<number> {
     return this.db.follow.count({
       where: {
-        followerId: userId
+        followerId: userId,
+        following: {
+          is: {
+            status: UserStatus.ACTIVE
+          }
+        }
       }
     });
   }
@@ -297,6 +413,11 @@ export class PrismaFollowRepository implements FollowRepositoryPort {
     const rows = await this.db.follow.findMany({
       where: {
         followingId: input.userId,
+        follower: {
+          is: {
+            status: UserStatus.ACTIVE
+          }
+        },
         ...followCursorWhere(input.cursor, 'followerId')
       },
       include: {
@@ -315,6 +436,11 @@ export class PrismaFollowRepository implements FollowRepositoryPort {
     const rows = await this.db.follow.findMany({
       where: {
         followerId: input.userId,
+        following: {
+          is: {
+            status: UserStatus.ACTIVE
+          }
+        },
         ...followCursorWhere(input.cursor, 'followingId')
       },
       include: {

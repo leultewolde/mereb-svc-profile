@@ -1,5 +1,7 @@
 import {
   createIntegrationEventEnvelope,
+  hasAdminReadAccess,
+  hasFullAdminAccess,
   type IntegrationEventEnvelope
 } from '@mereb/shared-packages';
 import { PROFILE_EVENT_TOPICS, type ProfileIntegrationEventRequest } from '../../contracts/profile-events.js';
@@ -12,12 +14,16 @@ import {
 } from '../../domain/profile/events.js';
 import {
   AuthenticationRequiredError,
+  AuthorizationRequiredError,
   CannotFollowSelfError,
   CannotUnfollowSelfError,
-  InvalidMediaAssetError
+  InvalidMediaAssetError,
+  ProfileUserNotFoundError
 } from '../../domain/profile/errors.js';
 import type { ExecutionContext } from './context.js';
 import type {
+  AdminUserConnectionPage,
+  AdminUserCursor,
   AdminUserMetrics,
   EventPublisherPort,
   FollowRepositoryPort,
@@ -32,6 +38,7 @@ import type {
   UserRepositoryPort
 } from './ports.js';
 import type {
+  AdminUserRecord,
   BootstrapUserDraft,
   UpdateProfilePatch,
   UserProfileRecord
@@ -101,6 +108,22 @@ function toContextUserId(ctx: ExecutionContext): string {
   return userId;
 }
 
+function requireAdminReadAccessOrThrow(ctx: ExecutionContext): string[] {
+  const roles = ctx.principal?.roles ?? [];
+  if (!hasAdminReadAccess(roles)) {
+    throw new AuthorizationRequiredError();
+  }
+  return roles;
+}
+
+function requireFullAdminAccessOrThrow(ctx: ExecutionContext): string[] {
+  const roles = ctx.principal?.roles ?? [];
+  if (!hasFullAdminAccess(roles)) {
+    throw new AuthorizationRequiredError();
+  }
+  return roles;
+}
+
 function getStartOfToday(now = new Date()): Date {
   const date = new Date(now);
   date.setHours(0, 0, 0, 0);
@@ -159,6 +182,41 @@ function decodeUserFollowCursor(encoded?: string): UserFollowCursor | undefined 
   }
 }
 
+function encodeAdminUserCursor(input: AdminUserCursor): string {
+  return Buffer.from(
+    JSON.stringify({
+      createdAt: input.createdAt.toISOString(),
+      userId: input.userId
+    }),
+    'utf8'
+  ).toString('base64url');
+}
+
+function decodeAdminUserCursor(encoded?: string): AdminUserCursor | undefined {
+  if (!encoded) {
+    return undefined;
+  }
+  try {
+    const raw = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')) as {
+      createdAt?: string;
+      userId?: string;
+    };
+    if (!raw.createdAt || !raw.userId) {
+      return undefined;
+    }
+    const createdAt = new Date(raw.createdAt);
+    if (Number.isNaN(createdAt.getTime())) {
+      return undefined;
+    }
+    return {
+      createdAt,
+      userId: raw.userId
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 function toUserConnectionPage(rows: UserConnectionRecord[], limit: number): UserConnectionPage {
   const edges = rows.slice(0, limit).map((row) => ({
     node: row.user,
@@ -167,6 +225,24 @@ function toUserConnectionPage(rows: UserConnectionRecord[], limit: number): User
       userId: row.user.id
     })
   }));
+  return {
+    edges,
+    pageInfo: {
+      endCursor: edges.at(-1)?.cursor ?? null,
+      hasNextPage: rows.length > limit
+    }
+  };
+}
+
+function toAdminUserConnectionPage(rows: AdminUserRecord[], limit: number): AdminUserConnectionPage {
+  const edges = rows.slice(0, limit).map((row) => ({
+    node: row,
+    cursor: encodeAdminUserCursor({
+      createdAt: row.createdAt,
+      userId: row.id
+    })
+  }));
+
   return {
     edges,
     pageInfo: {
@@ -423,7 +499,8 @@ export class SearchUsersQuery {
 export class GetAdminUserMetricsQuery {
   constructor(private readonly profileRead: ProfileReadRepositoryPort) {}
 
-  async execute(now = new Date()): Promise<AdminUserMetrics> {
+  async execute(ctx: ExecutionContext, now = new Date()): Promise<AdminUserMetrics> {
+    requireAdminReadAccessOrThrow(ctx);
     const [totalUsers, newUsersToday, newUsersThisWeek] = await Promise.all([
       this.profileRead.countUsers(),
       this.profileRead.countUsersCreatedSince(getStartOfToday(now)),
@@ -437,8 +514,100 @@ export class GetAdminUserMetricsQuery {
 export class GetAdminRecentUsersQuery {
   constructor(private readonly profileRead: ProfileReadRepositoryPort) {}
 
-  async execute(input: { limit?: number }): Promise<UserProfileRecord[]> {
+  async execute(input: { limit?: number }, ctx: ExecutionContext): Promise<AdminUserRecord[]> {
+    requireAdminReadAccessOrThrow(ctx);
     return this.profileRead.listRecentUsers(normalizeLimit(input.limit, 10));
+  }
+}
+
+export class GetAdminUsersQuery {
+  constructor(private readonly profileRead: ProfileReadRepositoryPort) {}
+
+  async execute(
+    input: { query?: string; status?: 'ACTIVE' | 'DEACTIVATED'; after?: string; limit?: number },
+    ctx: ExecutionContext
+  ): Promise<AdminUserConnectionPage> {
+    requireAdminReadAccessOrThrow(ctx);
+    const limit = normalizeLimit(input.limit, 20);
+    const rows = await this.profileRead.listAdminUsers({
+      query: input.query?.trim() || undefined,
+      status: input.status,
+      cursor: decodeAdminUserCursor(input.after),
+      take: limit + 1
+    });
+    return toAdminUserConnectionPage(rows, limit);
+  }
+}
+
+export class AdminDeactivateUserUseCase {
+  constructor(private readonly deps: ProfileUseCaseDeps) {}
+
+  async execute(input: { userId: string }, ctx: ExecutionContext): Promise<AdminUserRecord> {
+    requireFullAdminAccessOrThrow(ctx);
+
+    return runInMutationTransaction(this.deps, async (ports) => {
+      const updated = await ports.users.updateAdminStatus({
+        userId: input.userId,
+        status: 'DEACTIVATED'
+      });
+
+      if (!updated) {
+        throw new ProfileUserNotFoundError();
+      }
+
+      await publishBestEffort(
+        { eventPublisher: ports.eventPublisher, eventProducerName: this.deps.eventProducerName },
+        {
+          topic: PROFILE_EVENT_TOPICS.userDeactivated,
+          eventType: PROFILE_EVENT_TOPICS.userDeactivated,
+          key: updated.id,
+          data: {
+            user_id: updated.id
+          },
+          correlationId: ctx.correlationId,
+          causationId: ctx.causationId,
+          tenantId: ctx.tenantId
+        }
+      );
+
+      return updated;
+    });
+  }
+}
+
+export class AdminReactivateUserUseCase {
+  constructor(private readonly deps: ProfileUseCaseDeps) {}
+
+  async execute(input: { userId: string }, ctx: ExecutionContext): Promise<AdminUserRecord> {
+    requireFullAdminAccessOrThrow(ctx);
+
+    return runInMutationTransaction(this.deps, async (ports) => {
+      const updated = await ports.users.updateAdminStatus({
+        userId: input.userId,
+        status: 'ACTIVE'
+      });
+
+      if (!updated) {
+        throw new ProfileUserNotFoundError();
+      }
+
+      await publishBestEffort(
+        { eventPublisher: ports.eventPublisher, eventProducerName: this.deps.eventProducerName },
+        {
+          topic: PROFILE_EVENT_TOPICS.userReactivated,
+          eventType: PROFILE_EVENT_TOPICS.userReactivated,
+          key: updated.id,
+          data: {
+            user_id: updated.id
+          },
+          correlationId: ctx.correlationId,
+          causationId: ctx.causationId,
+          tenantId: ctx.tenantId
+        }
+      );
+
+      return updated;
+    });
   }
 }
 
@@ -543,6 +712,8 @@ export interface ProfileApplicationModule {
     updateProfile: UpdateProfileUseCase;
     followUser: FollowUserUseCase;
     unfollowUser: UnfollowUserUseCase;
+    adminDeactivateUser: AdminDeactivateUserUseCase;
+    adminReactivateUser: AdminReactivateUserUseCase;
   };
   queries: {
     getMe: GetMeQuery;
@@ -551,6 +722,7 @@ export interface ProfileApplicationModule {
     discoverUsers: DiscoverUsersQuery;
     getAdminUserMetrics: GetAdminUserMetricsQuery;
     getAdminRecentUsers: GetAdminRecentUsersQuery;
+    getAdminUsers: GetAdminUsersQuery;
     resolveUserReference: ResolveUserReferenceQuery;
     getFollowersCount: GetFollowersCountQuery;
     getFollowingCount: GetFollowingCountQuery;
@@ -570,8 +742,10 @@ export function createProfileApplicationModule(
     commands: {
       bootstrapUser: new BootstrapUserUseCase(deps),
       updateProfile: new UpdateProfileUseCase(deps),
-      followUser: new FollowUserUseCase(deps),
-      unfollowUser: new UnfollowUserUseCase(deps)
+    followUser: new FollowUserUseCase(deps),
+      unfollowUser: new UnfollowUserUseCase(deps),
+      adminDeactivateUser: new AdminDeactivateUserUseCase(deps),
+      adminReactivateUser: new AdminReactivateUserUseCase(deps)
     },
     queries: {
       getMe: new GetMeQuery(deps.users),
@@ -580,6 +754,7 @@ export function createProfileApplicationModule(
       discoverUsers: new DiscoverUsersQuery(deps.users),
       getAdminUserMetrics: new GetAdminUserMetricsQuery(deps.profileRead),
       getAdminRecentUsers: new GetAdminRecentUsersQuery(deps.profileRead),
+      getAdminUsers: new GetAdminUsersQuery(deps.profileRead),
       resolveUserReference: new ResolveUserReferenceQuery(deps.users),
       getFollowersCount: new GetFollowersCountQuery(deps.follows),
       getFollowingCount: new GetFollowingCountQuery(deps.follows),

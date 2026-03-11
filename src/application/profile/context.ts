@@ -1,5 +1,6 @@
 export interface AuthenticatedPrincipal {
-  userId: string;
+  userId?: string;
+  roles: string[];
 }
 
 export interface IdentityHints {
