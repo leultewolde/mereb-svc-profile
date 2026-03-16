@@ -58,6 +58,11 @@ function createProfileStub(): ProfileApplicationModule {
       getMe: { async execute() { return null; } },
       getUserByHandle: { async execute() { return null; } },
       searchUsers: { async execute() { return []; } },
+      searchUsersConnection: {
+        async execute() {
+          return { edges: [], pageInfo: { endCursor: null, hasNextPage: false } };
+        }
+      },
       discoverUsers: { async execute() { return []; } },
       getAdminUserMetrics: { async execute() { return { totalUsers: 0, newUsersToday: 0, newUsersThisWeek: 0 }; } },
       getAdminRecentUsers: { async execute() { return []; } },
@@ -167,6 +172,73 @@ test('unfollowUser maps CannotUnfollowSelfError to CANNOT_UNFOLLOW_SELF', async 
   );
 });
 
+test('followUser bootstraps the authenticated viewer before mutating follows', async () => {
+  const calls: Array<{ kind: string; payload: unknown }> = [];
+  const profile = createProfileStub();
+  profile.commands.bootstrapUser = {
+    async execute(input) {
+      calls.push({ kind: 'bootstrapUser', payload: input });
+      return { created: false, userId: 'viewer-1' };
+    }
+  } as ProfileApplicationModule['commands']['bootstrapUser'];
+  profile.commands.followUser = {
+    async execute(input, ctx) {
+      calls.push({ kind: 'followUser', payload: { input, ctx } });
+      return {
+        id: 'target-1',
+        handle: 'target',
+        displayName: 'Target User',
+        bio: null,
+        avatarKey: null,
+        createdAt: new Date('2026-01-01T00:00:00.000Z')
+      };
+    }
+  } as ProfileApplicationModule['commands']['followUser'];
+
+  const resolvers = createResolvers(profile);
+  const followUser = (
+    resolvers.Mutation as Record<string, (...args: unknown[]) => Promise<unknown>>
+  ).followUser;
+
+  await followUser(
+    {},
+    { userId: 'target-1' },
+    {
+      userId: 'viewer-1',
+      identity: {
+        preferredUsername: 'admin',
+        name: 'Admin User'
+      }
+    }
+  );
+
+  assert.deepEqual(calls, [
+    {
+      kind: 'bootstrapUser',
+      payload: {
+        id: 'viewer-1',
+        preferredHandle: 'admin',
+        displayName: 'Admin User',
+        bio: null,
+        avatarKey: null
+      }
+    },
+    {
+      kind: 'followUser',
+      payload: {
+        input: { userId: 'target-1' },
+        ctx: {
+          principal: { userId: 'viewer-1', roles: [] },
+          identity: {
+            preferredUsername: 'admin',
+            name: 'Admin User'
+          }
+        }
+      }
+    }
+  ]);
+});
+
 test('profile resolvers delegate query and user fields to the application module', async () => {
   const calls: Array<{ kind: string; payload: unknown }> = [];
   const profile = createProfileStub();
@@ -194,6 +266,12 @@ test('profile resolvers delegate query and user fields to the application module
       return [];
     }
   } as ProfileApplicationModule['queries']['searchUsers'];
+  profile.queries.searchUsersConnection = {
+    async execute(input) {
+      calls.push({ kind: 'searchUsersConnection', payload: input });
+      return { edges: [], pageInfo: { endCursor: null, hasNextPage: false } };
+    }
+  } as ProfileApplicationModule['queries']['searchUsersConnection'];
   profile.queries.getAdminUserMetrics = {
     async execute() {
       calls.push({ kind: 'adminUserMetrics', payload: null });
@@ -252,6 +330,7 @@ test('profile resolvers delegate query and user fields to the application module
   await query.me({}, {}, { userId: 'viewer' });
   await query.userByHandle({}, { handle: 'target' }, {});
   await query.searchUsers({}, { query: '@tar', limit: 4 }, { userId: 'viewer' });
+  await query.searchUsersConnection({}, { query: '@tar', after: 'cursor-1', limit: 4 }, { userId: 'viewer' });
   await query.adminUserMetrics({}, {}, { roles: ['admin'] });
   await query.adminRecentUsers({}, { limit: 5 }, { roles: ['admin'] });
   const entities = await query._entities(
@@ -286,6 +365,10 @@ test('profile resolvers delegate query and user fields to the application module
     { kind: 'me', payload: { principal: { userId: 'viewer', roles: [] }, identity: undefined } },
     { kind: 'userByHandle', payload: { handle: 'target' } },
     { kind: 'searchUsers', payload: { viewerId: 'viewer', query: '@tar', limit: 4 } },
+    {
+      kind: 'searchUsersConnection',
+      payload: { viewerId: 'viewer', query: '@tar', after: 'cursor-1', limit: 4 }
+    },
     { kind: 'adminUserMetrics', payload: null },
     { kind: 'adminRecentUsers', payload: { limit: 5 } },
     { kind: 'resolveUserReference', payload: { id: 'u1' } },

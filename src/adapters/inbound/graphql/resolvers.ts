@@ -202,6 +202,17 @@ export function createResolvers(
           query: args.query,
           limit: args.limit
         }),
+      searchUsersConnection: (
+        _source: unknown,
+        args: { query: string; after?: string; limit?: number },
+        ctx: GraphQLContext
+      ) =>
+        profile.queries.searchUsersConnection.execute({
+          viewerId: ctx.userId,
+          query: args.query,
+          after: args.after,
+          limit: args.limit
+        }),
       discoverUsers: (_source: unknown, args: { limit?: number }, ctx: GraphQLContext) =>
         profile.queries.discoverUsers.execute({
           viewerId: ctx.userId,
@@ -275,6 +286,7 @@ export function createResolvers(
         ctx: GraphQLContext
       ) => {
         try {
+          await ensureViewerBootstrapped(profile, ctx);
           return await profile.commands.followUser.execute(
             { userId: args.userId },
             toExecutionContext(ctx)
@@ -289,6 +301,7 @@ export function createResolvers(
         ctx: GraphQLContext
       ) => {
         try {
+          await ensureViewerBootstrapped(profile, ctx);
           return await profile.commands.unfollowUser.execute(
             { userId: args.userId },
             toExecutionContext(ctx)

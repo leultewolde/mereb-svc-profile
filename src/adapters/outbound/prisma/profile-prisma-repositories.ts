@@ -7,6 +7,8 @@ import type {
   ProfileReadRepositoryPort,
   ProfileTransactionPort,
   UserConnectionRecord,
+  UserSearchConnectionRecord,
+  UserSearchCursor,
   UserFollowCursor,
   UserRepositoryPort
 } from '../../../application/profile/ports.js';
@@ -24,12 +26,30 @@ import {
 import { prisma } from '../../../prisma.js';
 import {
   OutboxStatus,
-  type Prisma,
+  Prisma,
   type PrismaClient,
   UserStatus
 } from '../../../../generated/client/index.js';
 
 type ProfilePrismaDb = PrismaClient | Prisma.TransactionClient;
+type UserSearchRow = {
+  id: string;
+  handle: string;
+  displayName: string;
+  bio: string | null;
+  avatarKey: string | null;
+  createdAt: Date;
+  matchScore: number;
+};
+
+type BootstrapUserInsertRow = {
+  id: string;
+  handle: string;
+  displayName: string;
+  bio: string | null;
+  avatarKey: string | null;
+  createdAt: Date;
+};
 
 function isPrismaCode(error: unknown, code: string): boolean {
   return (
@@ -79,20 +99,59 @@ function normalizeUserSearchText(value: string): string {
   return value.trim().toLowerCase();
 }
 
-function scoreUserSearchMatch(
-  user: Pick<UserProfileRecord, 'handle' | 'displayName'>,
-  query: string
-): number {
-  const handle = normalizeUserSearchText(user.handle);
-  const displayName = normalizeUserSearchText(user.displayName);
+function toUserSearchConnectionRecord(input: UserSearchRow): UserSearchConnectionRecord {
+  return {
+    user: toUserRecord(input),
+    matchScore: Number(input.matchScore)
+  };
+}
 
-  if (handle === query) return 0;
-  if (handle.startsWith(query)) return 1;
-  if (displayName === query) return 2;
-  if (displayName.startsWith(query)) return 3;
-  if (handle.includes(query)) return 4;
-  if (displayName.includes(query)) return 5;
-  return 6;
+function buildUserSearchScoreSql(query: string): Prisma.Sql {
+  const exact = query;
+  const prefix = `${query}%`;
+  const contains = `%${query}%`;
+
+  return Prisma.sql`
+    CASE
+      WHEN LOWER("handle") = ${exact} THEN 0
+      WHEN LOWER("handle") LIKE ${prefix} THEN 1
+      WHEN LOWER("displayName") = ${exact} THEN 2
+      WHEN LOWER("displayName") LIKE ${prefix} THEN 3
+      WHEN LOWER("handle") LIKE ${contains} THEN 4
+      WHEN LOWER("displayName") LIKE ${contains} THEN 5
+      ELSE 6
+    END
+  `;
+}
+
+function buildUserSearchCursorSql(cursor: UserSearchCursor | undefined): Prisma.Sql {
+  if (!cursor) {
+    return Prisma.empty;
+  }
+
+  return Prisma.sql`
+    AND (
+      "matchScore" > ${cursor.matchScore}
+      OR ("matchScore" = ${cursor.matchScore} AND "createdAt" < ${cursor.createdAt})
+      OR (
+        "matchScore" = ${cursor.matchScore}
+        AND "createdAt" = ${cursor.createdAt}
+        AND "handle" > ${cursor.handle}
+      )
+      OR (
+        "matchScore" = ${cursor.matchScore}
+        AND "createdAt" = ${cursor.createdAt}
+        AND "handle" = ${cursor.handle}
+        AND "id" > ${cursor.userId}
+      )
+    )
+  `;
+}
+
+function appendUniqueHandleSuffix(handle: string): string {
+  const suffix = cryptoSuffix();
+  const maxBaseLength = Math.max(1, 32 - suffix.length - 1);
+  return `${handle.slice(0, maxBaseLength)}_${suffix}`.slice(0, 32);
 }
 
 function followCursorWhere(cursor: UserFollowCursor | undefined, idField: 'followerId' | 'followingId'): Prisma.FollowWhereInput | undefined {
@@ -128,6 +187,47 @@ function adminUserCursorWhere(cursor: AdminUserCursor | undefined): Prisma.UserW
 export class PrismaUserRepository implements UserRepositoryPort, ProfileReadRepositoryPort {
   constructor(private readonly db: ProfilePrismaDb = prisma) {}
 
+  private async insertBootstrapUserIfAvailable(input: {
+    id: string;
+    handle: string;
+    displayName: string;
+    bio: string | null;
+    avatarKey: string | null;
+  }): Promise<UserProfileRecord | null> {
+    const timestamp = new Date();
+    const rows = await this.db.$queryRaw<BootstrapUserInsertRow[]>(Prisma.sql`
+      INSERT INTO "User" (
+        "id",
+        "handle",
+        "displayName",
+        "bio",
+        "avatarKey",
+        "createdAt",
+        "updatedAt"
+      )
+      VALUES (
+        ${input.id},
+        ${input.handle},
+        ${input.displayName},
+        ${input.bio},
+        ${input.avatarKey},
+        ${timestamp},
+        ${timestamp}
+      )
+      ON CONFLICT DO NOTHING
+      RETURNING
+        "id",
+        "handle",
+        "displayName",
+        "bio",
+        "avatarKey",
+        "createdAt"
+    `);
+
+    const created = rows[0];
+    return created ? toUserRecord(created) : null;
+  }
+
   async findById(id: string): Promise<UserProfileRecord | null> {
     const user = await this.db.user.findFirst({
       where: {
@@ -154,52 +254,62 @@ export class PrismaUserRepository implements UserRepositoryPort, ProfileReadRepo
   }
 
   async searchUsers(input: { viewerId?: string; query: string; limit: number }): Promise<UserProfileRecord[]> {
+    const rows = await this.searchUsersPage({
+      viewerId: input.viewerId,
+      query: input.query,
+      take: input.limit
+    });
+
+    return rows.map((row) => row.user);
+  }
+
+  async searchUsersPage(input: {
+    viewerId?: string;
+    query: string;
+    cursor?: UserSearchCursor;
+    take: number;
+  }): Promise<UserSearchConnectionRecord[]> {
     const normalizedQuery = normalizeUserSearchText(input.query);
     if (!normalizedQuery) {
       return [];
     }
 
-    const users = await this.db.user.findMany({
-      where: {
-        status: UserStatus.ACTIVE,
-        ...(input.viewerId ? { id: { not: input.viewerId } } : {}),
-        OR: [
-          {
-            handle: {
-              contains: normalizedQuery,
-              mode: 'insensitive'
-            }
-          },
-          {
-            displayName: {
-              contains: normalizedQuery,
-              mode: 'insensitive'
-            }
-          }
-        ]
-      },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      take: Math.max(input.limit * 4, input.limit)
-    });
+    const scoreSql = buildUserSearchScoreSql(normalizedQuery);
+    const rows = await this.db.$queryRaw<UserSearchRow[]>(Prisma.sql`
+      WITH ranked_users AS (
+        SELECT
+          "id",
+          "handle",
+          "displayName",
+          "bio",
+          "avatarKey",
+          "createdAt",
+          ${scoreSql} AS "matchScore"
+        FROM "User"
+        WHERE
+          "status" = 'ACTIVE'
+          ${input.viewerId ? Prisma.sql`AND "id" <> ${input.viewerId}` : Prisma.empty}
+          AND (
+            LOWER("handle") LIKE ${`%${normalizedQuery}%`}
+            OR LOWER("displayName") LIKE ${`%${normalizedQuery}%`}
+          )
+      )
+      SELECT
+        "id",
+        "handle",
+        "displayName",
+        "bio",
+        "avatarKey",
+        "createdAt",
+        "matchScore"
+      FROM ranked_users
+      WHERE "matchScore" < 6
+      ${buildUserSearchCursorSql(input.cursor)}
+      ORDER BY "matchScore" ASC, "createdAt" DESC, "handle" ASC, "id" ASC
+      LIMIT ${input.take}
+    `);
 
-    return users
-      .map(toUserRecord)
-      .sort((left, right) => {
-        const scoreDiff =
-          scoreUserSearchMatch(left, normalizedQuery) -
-          scoreUserSearchMatch(right, normalizedQuery);
-        if (scoreDiff !== 0) {
-          return scoreDiff;
-        }
-
-        const dateDiff = right.createdAt.getTime() - left.createdAt.getTime();
-        if (dateDiff !== 0) {
-          return dateDiff;
-        }
-
-        return left.handle.localeCompare(right.handle);
-      })
-      .slice(0, input.limit);
+    return rows.map(toUserSearchConnectionRecord);
   }
 
   async findOrCreateWithFallback(input: BootstrapUserDraft): Promise<UserProfileRecord> {
@@ -209,28 +319,27 @@ export class PrismaUserRepository implements UserRepositoryPort, ProfileReadRepo
     }
 
     const draft = buildBootstrapUserDraft(input);
+    let candidateHandle = draft.handle;
 
-    try {
-      const created = await this.db.user.create({ data: draft });
-      return toUserRecord(created);
-    } catch (error) {
-      if (!isPrismaCode(error, 'P2002')) {
-        throw error;
-      }
-
-      const uniqueHandle = `${draft.handle}_${cryptoSuffix()}`.slice(0, 32);
-      const created = await this.db.user.create({
-        data: {
-          id: draft.id,
-          handle: uniqueHandle,
-          displayName: draft.displayName,
-          bio: draft.bio,
-          avatarKey: draft.avatarKey
-        }
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const created = await this.insertBootstrapUserIfAvailable({
+        ...draft,
+        handle: candidateHandle
       });
 
-      return toUserRecord(created);
+      if (created) {
+        return created;
+      }
+
+      const current = await this.db.user.findUnique({ where: { id: input.id } });
+      if (current) {
+        return toUserRecord(current);
+      }
+
+      candidateHandle = appendUniqueHandleSuffix(draft.handle);
     }
+
+    throw new Error(`Failed to allocate a unique handle for user ${input.id}`);
   }
 
   async upsertProfile(userId: string, patch: UpdateProfilePatch): Promise<UserProfileRecord> {

@@ -11,6 +11,8 @@ import type {
   MediaUrlSignerPort,
   ProfileReadRepositoryPort,
   ProfileTransactionPort,
+  UserSearchConnectionRecord,
+  UserSearchCursor,
   UserRepositoryPort
 } from '../src/application/profile/ports.js';
 import {
@@ -38,6 +40,7 @@ function makeUser(partial: Partial<AdminUserRecord> & Pick<AdminUserRecord, 'id'
 class FakeUsers implements UserRepositoryPort, ProfileReadRepositoryPort {
   private readonly users = new Map<string, AdminUserRecord>();
   readonly searchCalls: Array<{ viewerId?: string; query: string; limit: number }> = [];
+  readonly searchPageCalls: Array<{ viewerId?: string; query: string; cursor?: UserSearchCursor; take: number }> = [];
 
   seed(user: AdminUserRecord) {
     this.users.set(user.id, user);
@@ -57,8 +60,24 @@ class FakeUsers implements UserRepositoryPort, ProfileReadRepositoryPort {
 
   async searchUsers(input: { viewerId?: string; query: string; limit: number }): Promise<UserProfileRecord[]> {
     this.searchCalls.push(input);
+    const rows = await this.searchUsersPage({
+      viewerId: input.viewerId,
+      query: input.query,
+      take: input.limit
+    });
+
+    return rows.map((row) => row.user);
+  }
+
+  async searchUsersPage(input: {
+    viewerId?: string;
+    query: string;
+    cursor?: UserSearchCursor;
+    take: number;
+  }): Promise<UserSearchConnectionRecord[]> {
+    this.searchPageCalls.push(input);
     const normalizedQuery = input.query.trim().replace(/^@/, '').toLowerCase();
-    return Array.from(this.users.values())
+    const rows = Array.from(this.users.values())
       .filter((user) => user.status === 'ACTIVE')
       .filter((user) => user.id !== input.viewerId)
       .filter((user) => {
@@ -66,7 +85,49 @@ class FakeUsers implements UserRepositoryPort, ProfileReadRepositoryPort {
         const displayName = user.displayName.toLowerCase();
         return handle.includes(normalizedQuery) || displayName.includes(normalizedQuery);
       })
-      .slice(0, input.limit);
+      .map((user) => ({
+        user,
+        matchScore:
+          user.handle.toLowerCase() === normalizedQuery
+            ? 0
+            : user.handle.toLowerCase().startsWith(normalizedQuery)
+              ? 1
+              : user.displayName.toLowerCase() === normalizedQuery
+                ? 2
+                : user.displayName.toLowerCase().startsWith(normalizedQuery)
+                  ? 3
+                  : user.handle.toLowerCase().includes(normalizedQuery)
+                    ? 4
+                    : 5
+      }))
+      .sort((left, right) => {
+        const scoreDiff = left.matchScore - right.matchScore;
+        if (scoreDiff !== 0) return scoreDiff;
+        const dateDiff = right.user.createdAt.getTime() - left.user.createdAt.getTime();
+        if (dateDiff !== 0) return dateDiff;
+        const handleDiff = left.user.handle.localeCompare(right.user.handle);
+        if (handleDiff !== 0) return handleDiff;
+        return left.user.id.localeCompare(right.user.id);
+      });
+
+    const filtered = input.cursor
+      ? rows.filter((row) => {
+          if (row.matchScore !== input.cursor!.matchScore) {
+            return row.matchScore > input.cursor!.matchScore;
+          }
+          const createdAtDiff = row.user.createdAt.getTime() - input.cursor!.createdAt.getTime();
+          if (createdAtDiff !== 0) {
+            return createdAtDiff < 0;
+          }
+          const handleDiff = row.user.handle.localeCompare(input.cursor!.handle);
+          if (handleDiff !== 0) {
+            return handleDiff > 0;
+          }
+          return row.user.id.localeCompare(input.cursor!.userId) > 0;
+        })
+      : rows;
+
+    return filtered.slice(0, input.take);
   }
 
   async findOrCreateWithFallback(input: {
@@ -531,6 +592,19 @@ test('profile application commands and queries cover mutations, auth, and metric
     query: 'tar',
     limit: 5
   });
+  const searchUsersConnection = await module.queries.searchUsersConnection.execute({
+    viewerId: 'viewer',
+    query: '@tar',
+    limit: 1
+  });
+  assert.equal(searchUsersConnection.edges[0]?.node.id, 'target');
+  assert.equal(searchUsersConnection.pageInfo.hasNextPage, false);
+  assert.deepEqual(users.searchPageCalls.at(-1), {
+    viewerId: 'viewer',
+    query: 'tar',
+    cursor: undefined,
+    take: 2
+  });
 
   const resolved = await module.queries.resolveUserReference.execute({ id: 'ref-user' });
   assert.equal(resolved.id, 'ref-user');
@@ -608,6 +682,49 @@ test('profile application surfaces auth and self-follow domain errors', async ()
     () => module.queries.getAdminUserMetrics.execute({ principal: { userId: 'viewer', roles: [] } }),
     (error) => error instanceof AuthorizationRequiredError
   );
+});
+
+test('searchUsersConnection preserves ranked ordering across cursored pages', async () => {
+  const users = new FakeUsers();
+  users.seed(makeUser({ id: 'viewer', handle: 'viewer', displayName: 'Viewer', createdAt: new Date('2026-01-05T00:00:00.000Z') }));
+  users.seed(makeUser({ id: 'exact-handle', handle: 'alex', displayName: 'Someone Else', createdAt: new Date('2026-01-04T00:00:00.000Z') }));
+  users.seed(makeUser({ id: 'handle-prefix', handle: 'alexander', displayName: 'Alexander', createdAt: new Date('2026-01-03T00:00:00.000Z') }));
+  users.seed(makeUser({ id: 'display-exact', handle: 'teammate', displayName: 'Alex', createdAt: new Date('2026-01-02T00:00:00.000Z') }));
+  users.seed(makeUser({ id: 'handle-contains', handle: 'team-alex', displayName: 'Teammate', createdAt: new Date('2026-01-01T00:00:00.000Z') }));
+
+  const module = createProfileApplicationModule({
+    users,
+    follows: new FakeFollows(),
+    profileRead: users,
+    eventPublisher: new FakeEvents(),
+    mediaUrlSigner: new FakeMedia(),
+    eventProducerName: 'svc-profile'
+  });
+
+  const firstPage = await module.queries.searchUsersConnection.execute({
+    viewerId: 'viewer',
+    query: 'alex',
+    limit: 2
+  });
+
+  assert.deepEqual(
+    firstPage.edges.map((edge) => edge.node.id),
+    ['exact-handle', 'handle-prefix']
+  );
+  assert.equal(firstPage.pageInfo.hasNextPage, true);
+
+  const secondPage = await module.queries.searchUsersConnection.execute({
+    viewerId: 'viewer',
+    query: 'alex',
+    after: firstPage.pageInfo.endCursor ?? undefined,
+    limit: 2
+  });
+
+  assert.deepEqual(
+    secondPage.edges.map((edge) => edge.node.id),
+    ['display-exact', 'handle-contains']
+  );
+  assert.equal(secondPage.pageInfo.hasNextPage, false);
 });
 
 test('updateProfile resolves avatarAssetId with precedence over avatarKey and supports removal', async () => {

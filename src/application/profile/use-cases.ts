@@ -34,6 +34,8 @@ import type {
   ProfileTransactionPort,
   UserConnectionPage,
   UserConnectionRecord,
+  UserSearchConnectionRecord,
+  UserSearchCursor,
   UserFollowCursor,
   UserRepositoryPort
 } from './ports.js';
@@ -182,6 +184,52 @@ function decodeUserFollowCursor(encoded?: string): UserFollowCursor | undefined 
   }
 }
 
+function encodeUserSearchCursor(input: UserSearchCursor): string {
+  return Buffer.from(
+    JSON.stringify({
+      matchScore: input.matchScore,
+      createdAt: input.createdAt.toISOString(),
+      handle: input.handle,
+      userId: input.userId
+    }),
+    'utf8'
+  ).toString('base64url');
+}
+
+function decodeUserSearchCursor(encoded?: string): UserSearchCursor | undefined {
+  if (!encoded) {
+    return undefined;
+  }
+  try {
+    const raw = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')) as {
+      matchScore?: number;
+      createdAt?: string;
+      handle?: string;
+      userId?: string;
+    };
+    if (
+      typeof raw.matchScore !== 'number'
+      || !raw.createdAt
+      || !raw.handle
+      || !raw.userId
+    ) {
+      return undefined;
+    }
+    const createdAt = new Date(raw.createdAt);
+    if (Number.isNaN(createdAt.getTime())) {
+      return undefined;
+    }
+    return {
+      matchScore: raw.matchScore,
+      createdAt,
+      handle: raw.handle,
+      userId: raw.userId
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 function encodeAdminUserCursor(input: AdminUserCursor): string {
   return Buffer.from(
     JSON.stringify({
@@ -225,6 +273,29 @@ function toUserConnectionPage(rows: UserConnectionRecord[], limit: number): User
       userId: row.user.id
     })
   }));
+  return {
+    edges,
+    pageInfo: {
+      endCursor: edges.at(-1)?.cursor ?? null,
+      hasNextPage: rows.length > limit
+    }
+  };
+}
+
+function toUserSearchConnectionPage(
+  rows: UserSearchConnectionRecord[],
+  limit: number
+): UserConnectionPage {
+  const edges = rows.slice(0, limit).map((row) => ({
+    node: row.user,
+    cursor: encodeUserSearchCursor({
+      matchScore: row.matchScore,
+      createdAt: row.user.createdAt,
+      handle: row.user.handle,
+      userId: row.user.id
+    })
+  }));
+
   return {
     edges,
     pageInfo: {
@@ -496,6 +567,29 @@ export class SearchUsersQuery {
   }
 }
 
+export class SearchUsersConnectionQuery {
+  constructor(private readonly users: UserRepositoryPort) {}
+
+  async execute(
+    input: { viewerId?: string; query: string; after?: string; limit?: number }
+  ): Promise<UserConnectionPage> {
+    const limit = normalizeLimit(input.limit, 20);
+    const query = normalizeUserSearchQuery(input.query);
+    if (!query) {
+      return toUserSearchConnectionPage([], limit);
+    }
+
+    const rows = await this.users.searchUsersPage({
+      viewerId: input.viewerId,
+      query,
+      cursor: decodeUserSearchCursor(input.after),
+      take: limit + 1
+    });
+
+    return toUserSearchConnectionPage(rows, limit);
+  }
+}
+
 export class GetAdminUserMetricsQuery {
   constructor(private readonly profileRead: ProfileReadRepositoryPort) {}
 
@@ -719,6 +813,7 @@ export interface ProfileApplicationModule {
     getMe: GetMeQuery;
     getUserByHandle: GetUserByHandleQuery;
     searchUsers: SearchUsersQuery;
+    searchUsersConnection: SearchUsersConnectionQuery;
     discoverUsers: DiscoverUsersQuery;
     getAdminUserMetrics: GetAdminUserMetricsQuery;
     getAdminRecentUsers: GetAdminRecentUsersQuery;
@@ -751,6 +846,7 @@ export function createProfileApplicationModule(
       getMe: new GetMeQuery(deps.users),
       getUserByHandle: new GetUserByHandleQuery(deps.users),
       searchUsers: new SearchUsersQuery(deps.users),
+      searchUsersConnection: new SearchUsersConnectionQuery(deps.users),
       discoverUsers: new DiscoverUsersQuery(deps.users),
       getAdminUserMetrics: new GetAdminUserMetricsQuery(deps.profileRead),
       getAdminRecentUsers: new GetAdminRecentUsersQuery(deps.profileRead),

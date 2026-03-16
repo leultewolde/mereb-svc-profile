@@ -27,7 +27,12 @@ image:
       valueFrom:
         configMapKeyRef:
           name: platform-identity-stg
-          key: KEYCLOAK_WEBHOOK_CLIENT_ID
+          key: KEYCLOAK_WEBHOOK_CLIENT_IDS
+    - name: KEYCLOAK_WEBHOOK_SECRET
+      valueFrom:
+        secretKeyRef:
+          name: platform-identity-stg-secrets
+          key: PROFILE_BOOTSTRAP_SHARED_SECRET
   envFrom:
     - configMapRef:
         name: svc-profile-stg-config

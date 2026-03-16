@@ -35,6 +35,18 @@ export interface UserConnectionPage {
   };
 }
 
+export interface UserSearchCursor {
+  matchScore: number;
+  createdAt: Date;
+  handle: string;
+  userId: string;
+}
+
+export interface UserSearchConnectionRecord {
+  user: UserProfileRecord;
+  matchScore: number;
+}
+
 export interface AdminUserCursor {
   createdAt: Date;
   userId: string;
@@ -60,6 +72,12 @@ export interface UserRepositoryPort {
     query: string;
     limit: number;
   }): Promise<UserProfileRecord[]>;
+  searchUsersPage(input: {
+    viewerId?: string;
+    query: string;
+    cursor?: UserSearchCursor;
+    take: number;
+  }): Promise<UserSearchConnectionRecord[]>;
   findOrCreateWithFallback(input: BootstrapUserDraft): Promise<UserProfileRecord>;
   upsertProfile(userId: string, patch: UpdateProfilePatch): Promise<UserProfileRecord>;
   listDiscoverableUsers(input: { viewerId: string; limit: number }): Promise<UserProfileRecord[]>;

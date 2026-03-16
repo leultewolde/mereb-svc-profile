@@ -81,6 +81,7 @@ type Query {
   me: User
   userByHandle(handle: String!): User
   searchUsers(query: String!, limit: Int = 8): [User!]!
+  searchUsersConnection(query: String!, after: String, limit: Int = 20): UserConnection!
   discoverUsers(limit: Int = 8): [User!]!
   adminUserMetrics: AdminUserMetrics!
   adminRecentUsers(limit: Int = 10): [AdminUser!]!
