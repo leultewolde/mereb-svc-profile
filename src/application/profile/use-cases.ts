@@ -39,8 +39,9 @@ import type {
   UserFollowCursor,
   UserRepositoryPort
 } from './ports.js';
-import type {
+import {
   AdminUserRecord,
+  buildBootstrapUserDraft,
   BootstrapUserDraft,
   UpdateProfilePatch,
   UserProfileRecord
@@ -108,6 +109,25 @@ function toContextUserId(ctx: ExecutionContext): string {
     throw new AuthenticationRequiredError();
   }
   return userId;
+}
+
+function buildTransientUserReference(id: string): UserProfileRecord {
+  const fallback = buildBootstrapUserDraft({
+    id,
+    preferredHandle: id,
+    displayName: id,
+    bio: null,
+    avatarKey: null
+  });
+
+  return {
+    id: fallback.id,
+    handle: fallback.handle,
+    displayName: fallback.displayName,
+    bio: fallback.bio,
+    avatarKey: fallback.avatarKey,
+    createdAt: new Date(0)
+  };
 }
 
 function requireAdminReadAccessOrThrow(ctx: ExecutionContext): string[] {
@@ -709,13 +729,8 @@ export class ResolveUserReferenceQuery {
   constructor(private readonly users: UserRepositoryPort) {}
 
   async execute(input: { id: string }): Promise<UserProfileRecord> {
-    return this.users.findOrCreateWithFallback({
-      id: input.id,
-      preferredHandle: input.id,
-      displayName: input.id,
-      bio: null,
-      avatarKey: null
-    });
+    const existing = await this.users.findById(input.id);
+    return existing ?? buildTransientUserReference(input.id);
   }
 }
 

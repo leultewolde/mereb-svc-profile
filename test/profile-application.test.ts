@@ -608,6 +608,8 @@ test('profile application commands and queries cover mutations, auth, and metric
 
   const resolved = await module.queries.resolveUserReference.execute({ id: 'ref-user' });
   assert.equal(resolved.id, 'ref-user');
+  assert.equal(resolved.avatarKey, null);
+  assert.equal(await users.countUsers(), 4);
   assert.equal(await module.queries.getFollowersCount.execute({ userId: 'target' }), 1);
   assert.equal(await module.queries.getFollowingCount.execute({ userId: 'viewer' }), 0);
   assert.equal(

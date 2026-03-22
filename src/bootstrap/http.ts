@@ -1,10 +1,16 @@
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, {
+  type FastifyInstance,
+  type FastifyPluginAsync
+} from 'fastify';
 import helmet from '@fastify/helmet';
 import cors from '@fastify/cors';
+import type { FastifyCorsOptions, FastifyCorsOptionsDelegate } from '@fastify/cors';
 import sensible from '@fastify/sensible';
 import underPressure from '@fastify/under-pressure';
 import rateLimit from '@fastify/rate-limit';
+import type { RateLimitPluginOptions } from '@fastify/rate-limit';
 import mercurius from 'mercurius';
+import type { MercuriusOptions } from 'mercurius';
 import { makeExecutableSchema } from '@graphql-tools/schema';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -17,7 +23,7 @@ import {
   parseAuthHeader,
   verifyJwt
 } from '@mereb/shared-packages';
-import type { GraphQLContext } from '../context.js';
+import type { GraphQLContext, IdentityHints } from '../context.js';
 import { createContainer } from './container.js';
 import { createResolvers } from '../adapters/inbound/graphql/resolvers.js';
 import { registerBootstrapUsersRoute } from '../adapters/inbound/http/bootstrap-users-route.js';
@@ -31,6 +37,23 @@ const typeDefsPath = join(
   'schema.graphql'
 );
 const typeDefs = readFileSync(typeDefsPath, 'utf8');
+
+type RequestAuthState = {
+  userId?: string;
+  roles?: string[];
+  identityHints?: IdentityHints;
+};
+
+const helmetPlugin = helmet as unknown as FastifyPluginAsync;
+const corsPlugin = cors as unknown as FastifyPluginAsync<
+  FastifyCorsOptions | FastifyCorsOptionsDelegate
+>;
+const sensiblePlugin = sensible as unknown as FastifyPluginAsync;
+const rateLimitPlugin = rateLimit as unknown as FastifyPluginAsync<RateLimitPluginOptions>;
+const underPressurePlugin = underPressure as unknown as FastifyPluginAsync;
+const mercuriusPlugin = mercurius as unknown as FastifyPluginAsync<
+  MercuriusOptions & { federationMetadata?: boolean }
+>;
 
 function parseAllowedWebhookClientIds(): Set<string> {
   const clientIds =
@@ -51,8 +74,8 @@ type JwtIdentityPayload = {
   family_name?: string;
 };
 
-function extractIdentityHints(payload: JwtIdentityPayload) {
-  const hints = {
+function extractIdentityHints(payload: JwtIdentityPayload): IdentityHints | undefined {
+  const hints: IdentityHints = {
     preferredUsername: payload.preferred_username,
     email: payload.email,
     name: payload.name,
@@ -72,34 +95,35 @@ export async function buildServer(): Promise<FastifyInstance> {
 
   const container = createContainer();
 
-  await app.register(helmet);
-  await app.register(cors, { origin: true, credentials: true });
-  await app.register(sensible);
-  await app.register(rateLimit, { max: 1000, timeWindow: '1 minute' });
-  await app.register(underPressure);
+  await app.register(helmetPlugin);
+  await app.register(corsPlugin, { origin: true, credentials: true });
+  await app.register(sensiblePlugin);
+  await app.register(rateLimitPlugin, { max: 1000, timeWindow: '1 minute' });
+  await app.register(underPressurePlugin);
 
   const issuer = getEnv('OIDC_ISSUER');
   const audience = process.env.OIDC_AUDIENCE;
 
   app.addHook('onRequest', async (request) => {
+    const authenticatedRequest = request as typeof request & RequestAuthState;
     const token = parseAuthHeader(request.headers);
     if (!token) {
-      request.userId = undefined;
-      request.roles = [];
-      request.identityHints = undefined;
+      authenticatedRequest.userId = undefined;
+      authenticatedRequest.roles = [];
+      authenticatedRequest.identityHints = undefined;
       return;
     }
 
     try {
       const payload = (await verifyJwt(token, { issuer, audience })) as JwtIdentityPayload;
-      request.userId = payload.sub;
-      request.roles = extractJwtRoles(payload);
-      request.identityHints = extractIdentityHints(payload);
+      authenticatedRequest.userId = payload.sub;
+      authenticatedRequest.roles = extractJwtRoles(payload);
+      authenticatedRequest.identityHints = extractIdentityHints(payload);
     } catch (error) {
       request.log.warn({ err: error }, 'JWT verification failed');
-      request.userId = undefined;
-      request.roles = [];
-      request.identityHints = undefined;
+      authenticatedRequest.userId = undefined;
+      authenticatedRequest.roles = [];
+      authenticatedRequest.identityHints = undefined;
     }
   });
 
@@ -108,16 +132,21 @@ export async function buildServer(): Promise<FastifyInstance> {
     resolvers: createResolvers(container.profile)
   });
 
-  await app.register(mercurius, {
+  const mercuriusOptions: MercuriusOptions & { federationMetadata?: boolean } = {
     schema,
     graphiql: process.env.NODE_ENV !== 'production',
     federationMetadata: true,
-    context: (request): GraphQLContext => ({
-      userId: request.userId,
-      roles: request.roles ?? [],
-      identity: request.identityHints
-    })
-  });
+    context: (request): GraphQLContext => {
+      const authenticatedRequest = request as typeof request & RequestAuthState;
+      return {
+        userId: authenticatedRequest.userId,
+        roles: authenticatedRequest.roles ?? [],
+        identity: authenticatedRequest.identityHints
+      };
+    }
+  };
+
+  await app.register(mercuriusPlugin, mercuriusOptions);
 
   await registerBootstrapUsersRoute(
     app,
