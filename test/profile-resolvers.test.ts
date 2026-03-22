@@ -57,6 +57,7 @@ function createProfileStub(): ProfileApplicationModule {
     queries: {
       getMe: { async execute() { return null; } },
       getUserByHandle: { async execute() { return null; } },
+      getUsersByIds: { async execute() { return []; } },
       searchUsers: { async execute() { return []; } },
       searchUsersConnection: {
         async execute() {
@@ -260,6 +261,12 @@ test('profile resolvers delegate query and user fields to the application module
       return null;
     }
   } as ProfileApplicationModule['queries']['getUserByHandle'];
+  profile.queries.getUsersByIds = {
+    async execute(input) {
+      calls.push({ kind: 'usersByIds', payload: input });
+      return [];
+    }
+  } as ProfileApplicationModule['queries']['getUsersByIds'];
   profile.queries.searchUsers = {
     async execute(input) {
       calls.push({ kind: 'searchUsers', payload: input });
@@ -329,6 +336,7 @@ test('profile resolvers delegate query and user fields to the application module
 
   await query.me({}, {}, { userId: 'viewer' });
   await query.userByHandle({}, { handle: 'target' }, {});
+  await query.usersByIds({}, { ids: ['u1', 'u2'] }, {});
   await query.searchUsers({}, { query: '@tar', limit: 4 }, { userId: 'viewer' });
   await query.searchUsersConnection({}, { query: '@tar', after: 'cursor-1', limit: 4 }, { userId: 'viewer' });
   await query.adminUserMetrics({}, {}, { roles: ['admin'] });
@@ -364,6 +372,7 @@ test('profile resolvers delegate query and user fields to the application module
     },
     { kind: 'me', payload: { principal: { userId: 'viewer', roles: [] }, identity: undefined } },
     { kind: 'userByHandle', payload: { handle: 'target' } },
+    { kind: 'usersByIds', payload: { ids: ['u1', 'u2'] } },
     { kind: 'searchUsers', payload: { viewerId: 'viewer', query: '@tar', limit: 4 } },
     {
       kind: 'searchUsersConnection',

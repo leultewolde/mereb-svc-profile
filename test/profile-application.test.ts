@@ -50,6 +50,12 @@ class FakeUsers implements UserRepositoryPort, ProfileReadRepositoryPort {
     return this.users.get(id) ?? null;
   }
 
+  async findByIds(ids: string[]): Promise<UserProfileRecord[]> {
+    return ids
+      .map((id) => this.users.get(id))
+      .filter((user): user is AdminUserRecord => Boolean(user));
+  }
+
   async findByHandle(handle: string): Promise<UserProfileRecord | null> {
     return Array.from(this.users.values()).find((user) => user.status === 'ACTIVE' && user.handle === handle) ?? null;
   }
@@ -559,6 +565,10 @@ test('profile application commands and queries cover mutations, auth, and metric
   assert.equal(
     (await module.queries.getUserByHandle.execute({ handle: 'target' }))?.id,
     'target'
+  );
+  assert.deepEqual(
+    (await module.queries.getUsersByIds.execute({ ids: ['target', 'missing', 'viewer', 'target'] })).map((user) => user.id),
+    ['target', 'viewer']
   );
 
   const metrics = await module.queries.getAdminUserMetrics.execute(

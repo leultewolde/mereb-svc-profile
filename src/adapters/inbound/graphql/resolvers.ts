@@ -196,6 +196,8 @@ export function createResolvers(
       },
       userByHandle: (_source: unknown, args: { handle: string }) =>
         profile.queries.getUserByHandle.execute({ handle: args.handle }),
+      usersByIds: (_source: unknown, args: { ids: string[] }) =>
+        profile.queries.getUsersByIds.execute({ ids: args.ids }),
       searchUsers: (_source: unknown, args: { query: string; limit?: number }, ctx: GraphQLContext) =>
         profile.queries.searchUsers.execute({
           viewerId: ctx.userId,

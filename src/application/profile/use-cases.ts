@@ -570,6 +570,19 @@ export class GetUserByHandleQuery {
   }
 }
 
+export class GetUsersByIdsQuery {
+  constructor(private readonly users: UserRepositoryPort) {}
+
+  async execute(input: { ids: string[] }): Promise<UserProfileRecord[]> {
+    const ids = Array.from(new Set(input.ids.map((id) => id.trim()).filter(Boolean)));
+    if (!ids.length) {
+      return [];
+    }
+
+    return this.users.findByIds(ids);
+  }
+}
+
 export class SearchUsersQuery {
   constructor(private readonly users: UserRepositoryPort) {}
 
@@ -827,6 +840,7 @@ export interface ProfileApplicationModule {
   queries: {
     getMe: GetMeQuery;
     getUserByHandle: GetUserByHandleQuery;
+    getUsersByIds: GetUsersByIdsQuery;
     searchUsers: SearchUsersQuery;
     searchUsersConnection: SearchUsersConnectionQuery;
     discoverUsers: DiscoverUsersQuery;
@@ -860,6 +874,7 @@ export function createProfileApplicationModule(
     queries: {
       getMe: new GetMeQuery(deps.users),
       getUserByHandle: new GetUserByHandleQuery(deps.users),
+      getUsersByIds: new GetUsersByIdsQuery(deps.users),
       searchUsers: new SearchUsersQuery(deps.users),
       searchUsersConnection: new SearchUsersConnectionQuery(deps.users),
       discoverUsers: new DiscoverUsersQuery(deps.users),

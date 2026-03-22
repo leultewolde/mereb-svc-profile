@@ -65,6 +65,7 @@ export interface AdminUserConnectionPage {
 
 export interface UserRepositoryPort {
   findById(id: string): Promise<UserProfileRecord | null>;
+  findByIds(ids: string[]): Promise<UserProfileRecord[]>;
   findByHandle(handle: string): Promise<UserProfileRecord | null>;
   findAdminById(id: string): Promise<AdminUserRecord | null>;
   searchUsers(input: {

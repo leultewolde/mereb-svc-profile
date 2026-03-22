@@ -238,6 +238,25 @@ export class PrismaUserRepository implements UserRepositoryPort, ProfileReadRepo
     return user ? toUserRecord(user) : null;
   }
 
+  async findByIds(ids: string[]): Promise<UserProfileRecord[]> {
+    const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
+    if (!uniqueIds.length) {
+      return [];
+    }
+
+    const users = await this.db.user.findMany({
+      where: {
+        id: { in: uniqueIds },
+        status: UserStatus.ACTIVE
+      }
+    });
+
+    const usersById = new Map(users.map((user) => [user.id, toUserRecord(user)]));
+    return uniqueIds
+      .map((id) => usersById.get(id))
+      .filter((user): user is UserProfileRecord => Boolean(user));
+  }
+
   async findByHandle(handle: string): Promise<UserProfileRecord | null> {
     const user = await this.db.user.findFirst({
       where: {
