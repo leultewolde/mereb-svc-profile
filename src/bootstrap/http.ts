@@ -38,6 +38,31 @@ const typeDefsPath = join(
 );
 const typeDefs = readFileSync(typeDefsPath, 'utf8');
 
+function parseIssuerEnv(value: string): string[] {
+  return value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+async function verifyJwtWithIssuerFallback(
+  token: string,
+  options: { issuer: string; audience?: string }
+) {
+  const issuers = parseIssuerEnv(options.issuer);
+  let lastError: unknown;
+
+  for (const issuer of issuers) {
+    try {
+      return await verifyJwt(token, { issuer, audience: options.audience });
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError ?? new Error('OIDC_ISSUER env var required');
+}
+
 type RequestAuthState = {
   userId?: string;
   roles?: string[];
@@ -115,7 +140,7 @@ export async function buildServer(): Promise<FastifyInstance> {
     }
 
     try {
-      const payload = (await verifyJwt(token, { issuer, audience })) as JwtIdentityPayload;
+      const payload = (await verifyJwtWithIssuerFallback(token, { issuer, audience })) as JwtIdentityPayload;
       authenticatedRequest.userId = payload.sub;
       authenticatedRequest.roles = extractJwtRoles(payload);
       authenticatedRequest.identityHints = extractIdentityHints(payload);

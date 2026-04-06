@@ -39,7 +39,47 @@ image:
         name: svc-profile-dev-config
     - secretRef:
         name: svc-profile-dev-secrets
-        optional: true
+        optional: false
+
+vaultSecretsOperator:
+  enabled: true
+  auth:
+    create: true
+    spec:
+      vaultAuthGlobalRef:
+        name: mereb-apps-dev
+        namespace: vault-secrets-operator
+      kubernetes:
+        role: apps-dev-svc-profile
+      mount: kubernetes-dev
+  staticSecrets:
+    - name: svc-profile-runtime
+      spec:
+        type: kv-v2
+        mount: kv
+        path: apps/dev
+        refreshAfter: 5m
+        destination:
+          name: svc-profile-dev-secrets
+          create: true
+          overwrite: true
+          transformation:
+            excludes:
+              - .*
+            templates:
+              DATABASE_URL:
+                text: '{{- get .Secrets "PROFILE_DATABASE_URL" -}}'
+              KEYCLOAK_WEBHOOK_SECRET:
+                text: '{{- get .Secrets "KEYCLOAK_WEBHOOK_SECRET" -}}'
+              KEYCLOAK_WEBHOOK_BASIC_USER:
+                text: '{{- get .Secrets "KEYCLOAK_WEBHOOK_BASIC_USER" -}}'
+              KEYCLOAK_WEBHOOK_BASIC_PASS:
+                text: '{{- get .Secrets "KEYCLOAK_WEBHOOK_BASIC_PASS" -}}'
+              SPLUNK_HEC_TOKEN:
+                text: '{{- get .Secrets "SPLUNK_HEC_TOKEN" -}}'
+        rolloutRestartTargets:
+          - kind: Deployment
+            name: svc-profile-dev
 
 service:
   ports:

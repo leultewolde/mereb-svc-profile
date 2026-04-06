@@ -38,7 +38,47 @@ image:
         name: svc-profile-stg-config
     - secretRef:
         name: svc-profile-stg-secrets
-        optional: true
+        optional: false
+
+vaultSecretsOperator:
+  enabled: true
+  auth:
+    create: true
+    spec:
+      vaultAuthGlobalRef:
+        name: mereb-apps-stg
+        namespace: vault-secrets-operator
+      kubernetes:
+        role: apps-stg-svc-profile
+      mount: kubernetes-stg
+  staticSecrets:
+    - name: svc-profile-runtime
+      spec:
+        type: kv-v2
+        mount: kv
+        path: apps/stg
+        refreshAfter: 5m
+        destination:
+          name: svc-profile-stg-secrets
+          create: true
+          overwrite: true
+          transformation:
+            excludes:
+              - .*
+            templates:
+              DATABASE_URL:
+                text: '{{- get .Secrets "PROFILE_DATABASE_URL" -}}'
+              KEYCLOAK_WEBHOOK_SECRET:
+                text: '{{- get .Secrets "KEYCLOAK_WEBHOOK_SECRET" -}}'
+              KEYCLOAK_WEBHOOK_BASIC_USER:
+                text: '{{- get .Secrets "KEYCLOAK_WEBHOOK_BASIC_USER" -}}'
+              KEYCLOAK_WEBHOOK_BASIC_PASS:
+                text: '{{- get .Secrets "KEYCLOAK_WEBHOOK_BASIC_PASS" -}}'
+              SPLUNK_HEC_TOKEN:
+                text: '{{- get .Secrets "SPLUNK_HEC_TOKEN" -}}'
+        rolloutRestartTargets:
+          - kind: Deployment
+            name: svc-profile-stg
 
 service:
   ports:
