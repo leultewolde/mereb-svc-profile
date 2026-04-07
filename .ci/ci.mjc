@@ -54,6 +54,28 @@ deploy:
     repoCredentialId: helm-chart-creds
     valuesFiles:
       - .ci/values-dev.yaml
+    generatedBaseValues:
+      profile: apiService
+      inputs:
+        serviceName: svc-profile
+        containerPort: 4001
+        routePrefix: /profile
+        configMapName: svc-profile-dev-config
+        secretName: svc-profile-dev-secrets
+        tlsSecretName: profile-dev-tls
+        secretTemplates:
+          DATABASE_URL: PROFILE_DATABASE_URL
+          KEYCLOAK_WEBHOOK_SECRET: KEYCLOAK_WEBHOOK_SECRET
+          KEYCLOAK_WEBHOOK_BASIC_USER: KEYCLOAK_WEBHOOK_BASIC_USER
+          KEYCLOAK_WEBHOOK_BASIC_PASS: KEYCLOAK_WEBHOOK_BASIC_PASS
+          SPLUNK_HEC_TOKEN: SPLUNK_HEC_TOKEN
+        extraEnv:
+          - name: OIDC_ISSUER
+            fromPlatformIdentityConfigKey: OIDC_ISSUER
+          - name: KEYCLOAK_WEBHOOK_CLIENT_IDS
+            fromPlatformIdentityConfigKey: KEYCLOAK_WEBHOOK_CLIENT_IDS
+          - name: KEYCLOAK_WEBHOOK_SECRET
+            fromPlatformIdentitySecretKey: PROFILE_BOOTSTRAP_SHARED_SECRET
     smoke:
       url: https://api-dev.mereb.app/profile/healthz
       retries: 3
@@ -68,6 +90,28 @@ deploy:
     repoCredentialId: helm-chart-creds
     valuesFiles:
       - .ci/values-dev.yaml
+    generatedBaseValues:
+      profile: apiService
+      inputs:
+        serviceName: svc-profile
+        containerPort: 4001
+        routePrefix: /profile
+        configMapName: svc-profile-dev-config
+        secretName: svc-profile-dev-secrets
+        tlsSecretName: profile-dev-tls
+        secretTemplates:
+          DATABASE_URL: PROFILE_DATABASE_URL
+          KEYCLOAK_WEBHOOK_SECRET: KEYCLOAK_WEBHOOK_SECRET
+          KEYCLOAK_WEBHOOK_BASIC_USER: KEYCLOAK_WEBHOOK_BASIC_USER
+          KEYCLOAK_WEBHOOK_BASIC_PASS: KEYCLOAK_WEBHOOK_BASIC_PASS
+          SPLUNK_HEC_TOKEN: SPLUNK_HEC_TOKEN
+        extraEnv:
+          - name: OIDC_ISSUER
+            fromPlatformIdentityConfigKey: OIDC_ISSUER
+          - name: KEYCLOAK_WEBHOOK_CLIENT_IDS
+            fromPlatformIdentityConfigKey: KEYCLOAK_WEBHOOK_CLIENT_IDS
+          - name: KEYCLOAK_WEBHOOK_SECRET
+            fromPlatformIdentitySecretKey: PROFILE_BOOTSTRAP_SHARED_SECRET
     generatedValues:
       profile: outboxWorker
     notes: "Dedicated outbox relay worker deployment"
@@ -80,6 +124,28 @@ deploy:
     repoCredentialId: helm-chart-creds
     valuesFiles:
       - .ci/values-stg.yaml
+    generatedBaseValues:
+      profile: apiService
+      inputs:
+        serviceName: svc-profile
+        containerPort: 4001
+        routePrefix: /profile
+        configMapName: svc-profile-stg-config
+        secretName: svc-profile-stg-secrets
+        tlsSecretName: profile-stg-tls
+        secretTemplates:
+          DATABASE_URL: PROFILE_DATABASE_URL
+          KEYCLOAK_WEBHOOK_SECRET: KEYCLOAK_WEBHOOK_SECRET
+          KEYCLOAK_WEBHOOK_BASIC_USER: KEYCLOAK_WEBHOOK_BASIC_USER
+          KEYCLOAK_WEBHOOK_BASIC_PASS: KEYCLOAK_WEBHOOK_BASIC_PASS
+          SPLUNK_HEC_TOKEN: SPLUNK_HEC_TOKEN
+        extraEnv:
+          - name: OIDC_ISSUER
+            fromPlatformIdentityConfigKey: OIDC_ISSUER
+          - name: KEYCLOAK_WEBHOOK_CLIENT_IDS
+            fromPlatformIdentityConfigKey: KEYCLOAK_WEBHOOK_CLIENT_IDS
+          - name: KEYCLOAK_WEBHOOK_SECRET
+            fromPlatformIdentitySecretKey: PROFILE_BOOTSTRAP_SHARED_SECRET
     smoke:
       url: https://api-stg.mereb.app/profile/healthz
       retries: 3
@@ -94,6 +160,28 @@ deploy:
     repoCredentialId: helm-chart-creds
     valuesFiles:
       - .ci/values-stg.yaml
+    generatedBaseValues:
+      profile: apiService
+      inputs:
+        serviceName: svc-profile
+        containerPort: 4001
+        routePrefix: /profile
+        configMapName: svc-profile-stg-config
+        secretName: svc-profile-stg-secrets
+        tlsSecretName: profile-stg-tls
+        secretTemplates:
+          DATABASE_URL: PROFILE_DATABASE_URL
+          KEYCLOAK_WEBHOOK_SECRET: KEYCLOAK_WEBHOOK_SECRET
+          KEYCLOAK_WEBHOOK_BASIC_USER: KEYCLOAK_WEBHOOK_BASIC_USER
+          KEYCLOAK_WEBHOOK_BASIC_PASS: KEYCLOAK_WEBHOOK_BASIC_PASS
+          SPLUNK_HEC_TOKEN: SPLUNK_HEC_TOKEN
+        extraEnv:
+          - name: OIDC_ISSUER
+            fromPlatformIdentityConfigKey: OIDC_ISSUER
+          - name: KEYCLOAK_WEBHOOK_CLIENT_IDS
+            fromPlatformIdentityConfigKey: KEYCLOAK_WEBHOOK_CLIENT_IDS
+          - name: KEYCLOAK_WEBHOOK_SECRET
+            fromPlatformIdentitySecretKey: PROFILE_BOOTSTRAP_SHARED_SECRET
     generatedValues:
       profile: outboxWorker
     notes: "Dedicated outbox relay worker deployment"
@@ -106,6 +194,28 @@ deploy:
     repoCredentialId: helm-chart-creds
     valuesFiles:
       - .ci/values-prd.yaml
+    generatedBaseValues:
+      profile: apiService
+      inputs:
+        serviceName: svc-profile
+        containerPort: 4001
+        routePrefix: /profile
+        configMapName: svc-profile-prd-config
+        secretName: svc-profile-secrets
+        tlsSecretName: profile-prd-tls
+        secretTemplates:
+          DATABASE_URL: PROFILE_DATABASE_URL
+          KEYCLOAK_WEBHOOK_SECRET: KEYCLOAK_WEBHOOK_SECRET
+          KEYCLOAK_WEBHOOK_BASIC_USER: KEYCLOAK_WEBHOOK_BASIC_USER
+          KEYCLOAK_WEBHOOK_BASIC_PASS: KEYCLOAK_WEBHOOK_BASIC_PASS
+          SPLUNK_HEC_TOKEN: SPLUNK_HEC_TOKEN
+        extraEnv:
+          - name: OIDC_ISSUER
+            fromPlatformIdentityConfigKey: OIDC_ISSUER
+          - name: KEYCLOAK_WEBHOOK_CLIENT_IDS
+            fromPlatformIdentityConfigKey: KEYCLOAK_WEBHOOK_CLIENT_IDS
+          - name: KEYCLOAK_WEBHOOK_SECRET
+            fromPlatformIdentitySecretKey: PROFILE_BOOTSTRAP_SHARED_SECRET
     smoke:
       url: https://api.mereb.app/profile/healthz
       retries: 3
@@ -120,6 +230,28 @@ deploy:
     repoCredentialId: helm-chart-creds
     valuesFiles:
       - .ci/values-prd.yaml
+    generatedBaseValues:
+      profile: apiService
+      inputs:
+        serviceName: svc-profile
+        containerPort: 4001
+        routePrefix: /profile
+        configMapName: svc-profile-prd-config
+        secretName: svc-profile-secrets
+        tlsSecretName: profile-prd-tls
+        secretTemplates:
+          DATABASE_URL: PROFILE_DATABASE_URL
+          KEYCLOAK_WEBHOOK_SECRET: KEYCLOAK_WEBHOOK_SECRET
+          KEYCLOAK_WEBHOOK_BASIC_USER: KEYCLOAK_WEBHOOK_BASIC_USER
+          KEYCLOAK_WEBHOOK_BASIC_PASS: KEYCLOAK_WEBHOOK_BASIC_PASS
+          SPLUNK_HEC_TOKEN: SPLUNK_HEC_TOKEN
+        extraEnv:
+          - name: OIDC_ISSUER
+            fromPlatformIdentityConfigKey: OIDC_ISSUER
+          - name: KEYCLOAK_WEBHOOK_CLIENT_IDS
+            fromPlatformIdentityConfigKey: KEYCLOAK_WEBHOOK_CLIENT_IDS
+          - name: KEYCLOAK_WEBHOOK_SECRET
+            fromPlatformIdentitySecretKey: PROFILE_BOOTSTRAP_SHARED_SECRET
     generatedValues:
       profile: outboxWorker
       overlay:
