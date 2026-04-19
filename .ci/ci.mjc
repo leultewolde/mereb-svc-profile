@@ -48,6 +48,7 @@ deploy:
 
   defaults:
     chart: app-chart
+    chartVersion: 0.1.2
     repo: https://charts.leultewolde.com
     repoCredentialId: helm-chart-creds
     wait: true
@@ -61,14 +62,24 @@ deploy:
       containerPort: 4001
       routePrefix: /profile
       secretTemplates:
-        DATABASE_URL: PROFILE_DATABASE_URL
         KEYCLOAK_WEBHOOK_SECRET: KEYCLOAK_WEBHOOK_SECRET
         KEYCLOAK_WEBHOOK_BASIC_USER: KEYCLOAK_WEBHOOK_BASIC_USER
         KEYCLOAK_WEBHOOK_BASIC_PASS: KEYCLOAK_WEBHOOK_BASIC_PASS
         SPLUNK_HEC_TOKEN: SPLUNK_HEC_TOKEN
+      platformSecretTemplates:
+        DATABASE_URL: PROFILE_DATABASE_URL
       extraEnv:
         - name: OIDC_ISSUER
           fromPlatformIdentityConfigKey: OIDC_ISSUER
+        - name: KAFKA_BROKERS
+          fromPlatformIdentityConfigKey: KAFKA_BROKERS
+          optional: true
+        - name: KAFKA_SSL
+          fromPlatformIdentityConfigKey: KAFKA_SSL
+          optional: true
+        - name: KAFKA_SSL_INSECURE
+          fromPlatformIdentityConfigKey: KAFKA_SSL_INSECURE
+          optional: true
         - name: KEYCLOAK_WEBHOOK_CLIENT_IDS
           fromPlatformIdentityConfigKey: KEYCLOAK_WEBHOOK_CLIENT_IDS
         - name: KEYCLOAK_WEBHOOK_SECRET
