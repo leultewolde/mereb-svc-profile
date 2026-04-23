@@ -200,7 +200,7 @@ deploy:
         sh: ./scripts/graphos/publish-subgraph.sh
       - name: Queue GraphOS router promotion
         when: '!pr'
-        verb: jenkins.build job=graphos-promote-prd wait=false propagate=false quietPeriod=300
+        verb: jenkins.build job=RMHY/Mereb/infra/graphos-promote-prd wait=false propagate=false quietPeriod=300
 
   prd_outbox:
     extends: prd
