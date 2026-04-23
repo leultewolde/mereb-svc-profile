@@ -198,12 +198,16 @@ deploy:
             id: graphos-rover-api-key
             env: ROVER_APOLLO_KEY
         sh: ./scripts/graphos/publish-subgraph.sh
+      - name: Queue GraphOS router promotion
+        when: '!pr'
+        verb: jenkins.build job=graphos-promote-prd wait=false propagate=false quietPeriod=300
 
   prd_outbox:
     extends: prd
     release: svc-profile-outbox
     namespace: apps-prd
     smoke: false
+    postDeployStages: []
     generatedValues:
       profile: outboxWorker
       overlay:
