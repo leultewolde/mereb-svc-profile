@@ -21,7 +21,8 @@ import {
   getEnv,
   loadEnv,
   parseAuthHeader,
-  verifyJwt
+  parseIssuerList,
+  verifyJwtWithIssuers
 } from '@mereb/shared-packages';
 import type { GraphQLContext, IdentityHints } from '../context.js';
 import { createContainer } from './container.js';
@@ -37,31 +38,6 @@ const typeDefsPath = join(
   'schema.graphql'
 );
 const typeDefs = readFileSync(typeDefsPath, 'utf8');
-
-function parseIssuerEnv(value: string): string[] {
-  return value
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-}
-
-async function verifyJwtWithIssuerFallback(
-  token: string,
-  options: { issuer: string; audience?: string }
-) {
-  const issuers = parseIssuerEnv(options.issuer);
-  let lastError: unknown;
-
-  for (const issuer of issuers) {
-    try {
-      return await verifyJwt(token, { issuer, audience: options.audience });
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  throw lastError ?? new Error('OIDC_ISSUER env var required');
-}
 
 type RequestAuthState = {
   userId?: string;
@@ -126,7 +102,7 @@ export async function buildServer(): Promise<FastifyInstance> {
   await app.register(rateLimitPlugin, { max: 1000, timeWindow: '1 minute' });
   await app.register(underPressurePlugin);
 
-  const issuer = getEnv('OIDC_ISSUER');
+  const issuers = parseIssuerList(getEnv('OIDC_ISSUER'));
   const audience = process.env.OIDC_AUDIENCE;
 
   app.addHook('onRequest', async (request) => {
@@ -140,7 +116,7 @@ export async function buildServer(): Promise<FastifyInstance> {
     }
 
     try {
-      const payload = (await verifyJwtWithIssuerFallback(token, { issuer, audience })) as JwtIdentityPayload;
+      const payload = (await verifyJwtWithIssuers(token, { issuers, audience })) as JwtIdentityPayload;
       authenticatedRequest.userId = payload.sub;
       authenticatedRequest.roles = extractJwtRoles(payload);
       authenticatedRequest.identityHints = extractIdentityHints(payload);
