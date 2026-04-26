@@ -1,5 +1,6 @@
 import type { IResolvers } from '@graphql-tools/utils';
 import { GraphQLScalarType, Kind, type ValueNode } from 'graphql';
+import { mapInstanceofToGraphQLError } from '@mereb/shared-packages';
 import type { GraphQLContext } from '../../../context.js';
 import {
   AuthenticationRequiredError,
@@ -98,26 +99,14 @@ async function ensureViewerBootstrapped(
 }
 
 function toGraphQLError(error: unknown): never {
-  if (error instanceof AuthenticationRequiredError) {
-    throw new Error('UNAUTHENTICATED');
-  }
-  if (error instanceof AuthorizationRequiredError) {
-    throw new Error('FORBIDDEN');
-  }
-  if (error instanceof CannotFollowSelfError) {
-    throw new Error('CANNOT_FOLLOW_SELF');
-  }
-  if (error instanceof CannotUnfollowSelfError) {
-    throw new Error('CANNOT_UNFOLLOW_SELF');
-  }
-  if (error instanceof InvalidMediaAssetError) {
-    throw new Error(error.code);
-  }
-  if (error instanceof ProfileUserNotFoundError) {
-    throw new Error(error.code);
-  }
-
-  throw error;
+  mapInstanceofToGraphQLError(error, [
+    [AuthenticationRequiredError, 'UNAUTHENTICATED'],
+    [AuthorizationRequiredError, 'FORBIDDEN'],
+    [CannotFollowSelfError, 'CANNOT_FOLLOW_SELF'],
+    [CannotUnfollowSelfError, 'CANNOT_UNFOLLOW_SELF'],
+    [InvalidMediaAssetError, (e) => (e as InvalidMediaAssetError).code],
+    [ProfileUserNotFoundError, (e) => (e as ProfileUserNotFoundError).code]
+  ]);
 }
 
 export function createResolvers(
